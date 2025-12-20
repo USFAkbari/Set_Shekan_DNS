@@ -35,36 +35,8 @@ You can download just the script file using one of these methods:
 
 ```bash
 # Download and run directly:
-curl -sSL https://raw.githubusercontent.com/USFAkbari/Set_Shekan_DNS/main/shekan_dns.sh | sudo sh
+curl -sSL https://raw.githubusercontent.com/USFAkbari/Set_Shekan_DNS/main/shekan_dns.sh -o /tmp/shekan_dns.sh && chmod +x /tmp/shekan_dns.sh && sudo /tmp/shekan_dns.sh
 ```
-
-#### Using Git (single file)
-
-```bash
-git clone --depth 1 --filter=blob:none --sparse https://github.com/USFAkbari/Set_Shekan_DNS.git
-cd Set_Shekan_DNS
-git sparse-checkout set shekan_dns.sh
-chmod +x shekan_dns.sh
-```
-
-### Option 3: Copy and Paste
-
-1. Open the script file (`shekan_dns.sh`) in your browser or text editor
-2. Copy the entire contents
-3. Create a new file on your system:
-
-```bash
-   nano shekan_dns.sh
-```
-
-4. Paste the contents and save (Ctrl+X, then Y, then Enter)
-5. Make it executable:
-
-```bash
-   chmod +x shekan_dns.sh
-```
-
-## Usage
 
 ### Running the Script
 
@@ -87,7 +59,7 @@ When you run the script, you'll see an interactive menu:
 Choose an option (1/2):
 ```
 
-**Option 1: Add Shekan free DNS**
+### Option 1: Add Shekan free DNS
 
 - Creates a backup of your current DNS configuration (if not already exists)
 - Configures your system to use Shekan DNS servers:
@@ -95,7 +67,7 @@ Choose an option (1/2):
   - Secondary: `185.51.200.2`
 - Restarts systemd-resolved service
 
-**Option 2: Roll back DNS settings**
+### Option 2: Roll back DNS settings
 
 - Restores your original DNS configuration from backup
 - If no backup exists, applies default systemd-resolved settings
