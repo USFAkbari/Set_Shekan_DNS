@@ -2,6 +2,8 @@
 
 A simple bash script to manage DNS settings on Linux systems using systemd-resolved. This script allows you to easily configure your system to use Shekan free DNS servers or rollback to your original DNS configuration.
 
+**Repository**: [https://github.com/USFAkbari/Set_Shekan_DNS](https://github.com/USFAkbari/Set_Shekan_DNS)
+
 ## Features
 
 - 🔧 Easy DNS configuration using Shekan free DNS servers
@@ -23,8 +25,8 @@ A simple bash script to manage DNS settings on Linux systems using systemd-resol
 If you have Git installed, you can clone the entire repository:
 
 ```bash
-git clone <repository-url>
-cd Shekan
+git clone https://github.com/USFAkbari/Set_Shekan_DNS.git
+cd Set_Shekan_DNS
 ```
 
 ### Option 2: Download the Script Directly
@@ -33,20 +35,20 @@ You can download just the script file using one of these methods:
 
 #### Using wget:
 ```bash
-wget https://raw.githubusercontent.com/<username>/<repository>/main/shekan_dns.sh
+wget https://raw.githubusercontent.com/USFAkbari/Set_Shekan_DNS/main/shekan_dns.sh
 chmod +x shekan_dns.sh
 ```
 
 #### Using curl:
 ```bash
-curl -O https://raw.githubusercontent.com/<username>/<repository>/main/shekan_dns.sh
+curl -O https://raw.githubusercontent.com/USFAkbari/Set_Shekan_DNS/main/shekan_dns.sh
 chmod +x shekan_dns.sh
 ```
 
 #### Using Git (single file):
 ```bash
-git clone --depth 1 --filter=blob:none --sparse <repository-url>
-cd <repository-name>
+git clone --depth 1 --filter=blob:none --sparse https://github.com/USFAkbari/Set_Shekan_DNS.git
+cd Set_Shekan_DNS
 git sparse-checkout set shekan_dns.sh
 chmod +x shekan_dns.sh
 ```
