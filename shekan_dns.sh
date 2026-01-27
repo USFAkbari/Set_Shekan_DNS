@@ -69,6 +69,39 @@ add_shekan_Free() {
   echo "[+] Shekan DNS applied successfully!"
 }
 
+add_arvan_dns() {
+  echo "[+] Adding Shekan free DNS=217.218.127.127 217.218.155.155"
+
+  # Backup original config if not already backed up
+  if [ ! -f "$BACKUP_CONF" ]; then
+    cp "$SYSTEMD_CONF" "$BACKUP_CONF"
+    echo "[+] Backup created at $BACKUP_CONF"
+  else
+    echo "[i] Backup already exists: $BACKUP_CONF"
+  fi
+
+  # Update DNS to Shekan
+  sed -i 's/^#DNS=.*/DNS=217.218.127.127 217.218.155.155/' $SYSTEMD_CONF ||
+  echo "DNS=217.218.127.127 217.218.155.155" >>$SYSTEMD_CONF
+  
+  # Add DNS Fallback
+  sed -i 's/^#FallbackDNS=.*/FallbackDNS=8.8.8.8/' $SYSTEMD_CONF
+  sed -i 's/^FallbackDNS=.*/FallbackDNS=8.8.8.8/' $SYSTEMD_CONF
+
+  # Ensure DNSStubListener=no
+  sed -i 's/^#DNSStubListener=.*/DNSStubListener=no/' $SYSTEMD_CONF
+  sed -i 's/^DNSStubListener=.*/DNSStubListener=no/' $SYSTEMD_CONF
+
+  # Link resolv.conf to systemd-resolved
+  ln -sf /etc/systemd/resolved.conf /etc/resolved.conf
+
+  systemctl restart systemd-resolved
+  echo "--------------------------------------------------------------"
+  cat /etc/resolved.conf
+  echo "--------------------------------------------------------------"
+  echo "[+] Shekan DNS applied successfully!"
+}
+
 rollback_dns() {
   echo "[+] Rolling back DNS settings..."
 
@@ -116,14 +149,16 @@ echo "     Shekan DNS Manager (systemd)       "
 echo "======================================="
 echo "1) Add Pro Shekan"
 echo "2) Add Free Shekan"
-echo "3) Roll back DNS settings"
-echo -n "Choose an option (1~3): "
+echo "3) Add Free Arvan DNS"
+echo "4) Roll back DNS settings"
+echo -n "Choose an option (1~4): "
 read choice
 
 case $choice in
 1) add_shekan_pro ;;
 2) add_shekan_dns ;;
-3) rollback_dns ;;
+3) add_arvan_dns ;;
+4) rollback_dns ;;
 *)
   echo "Invalid option"
   exit 1
