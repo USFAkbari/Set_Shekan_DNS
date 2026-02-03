@@ -1,14 +1,18 @@
-# Shekan DNS Manager
+# DNS Manager - System Configuration
 
-A simple bash script to manage DNS settings on Linux systems using systemd-resolved. This script allows you to easily configure your system to use Shekan free DNS servers or rollback to your original DNS configuration.
+A comprehensive bash script to manage DNS settings on Linux systems using systemd-resolved. This script supports multiple DNS providers including Iranian services (Shekan, Arvan) and major international DNS services.
 
 ## Features
 
-- 🔧 Easy DNS configuration using Shekan free DNS servers
+- 🌍 Support for multiple DNS providers (Iranian & International)
+- 🔧 Easy DNS configuration with interactive colored menu
 - 💾 Automatic backup of original DNS settings
 - 🔄 Simple rollback functionality to restore original settings
-- 🛡️ Safe operation with backup verification
-- 📋 Interactive menu for easy use
+- 🛡️ Safe operation with backup
+- Detailed, timestamped output for each operation
+- ⚡ Color-coded status messages for better readability
+- 🎯 DNS verification after configuration
+- 🚀 Quick access via shell alias
 
 ## Requirements
 
@@ -16,62 +20,118 @@ A simple bash script to manage DNS settings on Linux systems using systemd-resol
 - Root/sudo privileges
 - Bash shell
 
-## Installation / Getting the Script
+## Installation
 
-### Option 1: Clone the Repository
+### System-wide Installation (Recommended)
 
-If you have Git installed, you can clone the entire repository:
+Install DNS Manager to `/usr/local/bin/` for easy access from anywhere in your system:
 
 ```bash
+# Clone the repository
 git clone https://github.com/USFAkbari/Set_Shekan_DNS.git
 cd Set_Shekan_DNS
+
+# Copy to /usr/local/bin/
+sudo cp dnsManager /usr/local/bin/dnsManager
+
+# Make it executable
+sudo chmod +x /usr/local/bin/dnsManager
 ```
 
-### Option 2: Download the Script Directly
-
-You can download just the script file using one of these methods:
-
-#### Using curl
+After installation, you can run DNS Manager from anywhere:
 
 ```bash
-# Download and run directly:
-curl -sSL https://raw.githubusercontent.com/USFAkbari/Set_Shekan_DNS/main/shekan_dns.sh -o /tmp/shekan_dns.sh && chmod +x /tmp/shekan_dns.sh && sudo /tmp/shekan_dns.sh
+dnsManager
 ```
 
-### Running the Script
+### Download and Install (One-Liner)
 
-The script requires root privileges to modify system DNS settings:
+Download and install directly to `/usr/local/bin/`:
 
 ```bash
-sudo ./shekan_dns.sh
+sudo curl -sSL https://raw.githubusercontent.com/USFAkbari/Set_Shekan_DNS/main/dnsManager -o /usr/local/bin/dnsManager && sudo chmod +x /usr/local/bin/dnsManager
+```
+
+Then run:
+
+```bash
+dnsManager
+```
+
+### Run Without Installing
+
+If you prefer to run the script without installing:
+
+```bash
+# Clone the repository
+git clone https://github.com/USFAkbari/Set_Shekan_DNS.git
+cd Set_Shekan_DNS
+
+# Run directly (requires sudo)
+sudo ./dnsManager
+```
+
+Or download and run directly:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/USFAkbari/Set_Shekan_DNS/main/dnsManager -o /tmp/dnsManager && chmod +x /tmp/dnsManager && sudo /tmp/dnsManager
+```
+
+### Uninstallation
+
+To remove DNS Manager from your system:
+
+```bash
+sudo rm /usr/local/bin/dnsManager
 ```
 
 ### Menu Options
 
-When you run the script, you'll see an interactive menu:
+When you run the script, you'll see an interactive, color-coded menu:
 
 ```text
-=======================================
-     Shekan DNS Manager (systemd)       
-=======================================
-1) Add Shekan free DNS
-2) Roll back DNS settings
-Choose an option (1/2):
+╔═══════════════════════════════════════════════════════╗
+║           DNS Manager - System Configuration         ║
+╚═══════════════════════════════════════════════════════╝
+
+Iranian DNS Services:
+  1) Shekan Pro DNS        (178.22.122.101, 185.51.200.1)
+  2) Shekan Free DNS       (178.22.122.100, 185.51.200.2)
+  3) Arvan Cloud DNS       (217.218.127.127, 217.218.155.155)
+
+International DNS Services:
+  4) Google Public DNS     (8.8.8.8, 8.8.4.4)
+  5) Cloudflare DNS        (1.1.1.1, 1.0.0.1)
+  6) Quad9 DNS             (9.9.9.9, 149.112.112.112) - Malware Protection
+  7) OpenDNS               (208.67.222.222, 208.67.220.220)
+  8) AdGuard DNS           (94.140.14.14, 94.140.15.15) - Ad Blocking
+
+System Management:
+  9) Roll back to original DNS settings
+
+═══════════════════════════════════════════════════════
+Choose an option (1-9):
 ```
 
-### Option 1: Add Shekan free DNS
+### DNS Options Details
 
-- Creates a backup of your current DNS configuration (if not already exists)
-- Configures your system to use Shekan DNS servers:
-  - Primary: `178.22.122.100`
-  - Secondary: `185.51.200.2`
-- Restarts systemd-resolved service
+#### Iranian DNS Services
 
-### Option 2: Roll back DNS settings
+1. **Shekan Pro DNS** - Premium Shekan service with fallback to Google DNS
+2. **Shekan Free DNS** - Free Shekan service with fallback to Google DNS
+3. **Arvan Cloud DNS** - Iranian CDN and cloud provider with fallback to Cloudflare
 
-- Restores your original DNS configuration from backup
-- If no backup exists, applies default systemd-resolved settings
-- Restarts systemd-resolved service
+#### International DNS Services
+
+1. **Google Public DNS** - Google's fast and reliable DNS service
+2. **Cloudflare DNS** - Privacy-focused DNS with excellent performance
+3. **Quad9 DNS** - Security-focused DNS with built-in malware blocking
+4. **OpenDNS** - Cisco's DNS with filtering capabilities
+5. **AdGuard DNS** - DNS with built-in ad and tracker blocking
+
+#### System Management
+
+1. **Roll back DNS** - Restores original DNS configuration from backup or applies system defaults
 
 ## What the Script Does
 
@@ -92,13 +152,15 @@ Choose an option (1/2):
 ### Permission Denied
 
 If you get a permission denied error, make sure you're running with sudo:
+
 ```bash
-sudo ./shekan_dns.sh
+sudo dnsManager
 ```
 
 ### systemd-resolved Not Running
 
 If systemd-resolved is not running on your system, you may need to enable it:
+
 ```bash
 sudo systemctl enable systemd-resolved
 sudo systemctl start systemd-resolved
@@ -107,6 +169,7 @@ sudo systemctl start systemd-resolved
 ### Verify DNS Settings
 
 To verify your DNS settings after running the script:
+
 ```bash
 systemd-resolve --status
 # or
@@ -116,6 +179,7 @@ resolvectl status
 ### Manual Rollback
 
 If you need to manually restore the backup:
+
 ```bash
 sudo cp /etc/systemd/resolved.conf.backup /etc/systemd/resolved.conf
 sudo systemctl restart systemd-resolved
