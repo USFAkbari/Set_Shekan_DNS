@@ -215,9 +215,10 @@ echo -e "  ${YELLOW}8)${NC} AdGuard DNS           (94.140.14.14, 94.140.15.15) -
 echo ""
 echo -e "${GREEN}System Management:${NC}"
 echo -e "  ${YELLOW}9)${NC} Roll back to original DNS settings"
+echo -e "  ${YELLOW}0)${NC} Exit / Quit"
 echo ""
 echo -e "${BLUE}═══════════════════════════════════════════════════════${NC}"
-echo -n -e "${GREEN}Choose an option (1-9): ${NC}"
+echo -n -e "${GREEN}Choose an option (0-9): ${NC}"
 read choice
 
 case $choice in
@@ -230,8 +231,12 @@ case $choice in
   7) add_opendns ;;
   8) add_adguard_dns ;;
   9) rollback_dns ;;
+  0)
+    print_message "$GREEN" "✓ Exiting DNS Manager. Goodbye!"
+    exit 0
+    ;;
   *)
-    print_message "$RED" "✗ Invalid option. Please choose 1-9."
+    print_message "$RED" "✗ Invalid option. Please choose 0-9."
     exit 1
     ;;
 esac
