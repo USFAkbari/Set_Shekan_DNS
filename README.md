@@ -1,198 +1,209 @@
-# DNS Manager - System Configuration
+# DNS Manager - NetPlan Configuration Tool
 
-A comprehensive bash script to manage DNS settings on Linux systems using systemd-resolved. This script supports multiple DNS providers including Iranian services (Shekan, Arvan) and major international DNS services.
+A comprehensive bash script to manage DNS settings on Linux systems using **NetPlan** (primary) with **systemd-resolved** fallback. Features an interactive menu with real-time DNS status display, supporting Iranian DNS services (Shekan, Arvan) and major international DNS providers.
 
-## Features
+## ✨ Features
 
-- 🌍 Support for multiple DNS providers (Iranian & International)
-- 🔧 Easy DNS configuration with interactive colored menu
-- 💾 Automatic backup of original DNS settings
-- 🔄 Simple rollback functionality to restore original settings
-- 🛡️ Safe operation with backup
-- Detailed, timestamped output for each operation
-- ⚡ Color-coded status messages for better readability
-- 🎯 DNS verification after configuration
-- 🚀 Quick access via shell alias
+- 🌍 **Multiple DNS Providers**: Iranian (Shekan, Arvan) & International (Google, Cloudflare, Quad9, OpenDNS, AdGuard)
+- 🔒 **VPN DNS Support**: ExpressVPN recommended DNS configuration
+- 🚀 **NetPlan-First**: Prioritizes NetPlan for persistent, reliable DNS configuration
+- 📊 **Live DNS Table**: Real-time display of current DNS settings in the menu
+- 🔄 **Reset to Default**: Easily restore system default DNS configuration
+- 💾 **Automatic Backup**: Saves original settings before making changes
+- ↩️ **Rollback Support**: One-click restoration of original DNS settings
+- 🎨 **Modern UI**: Color-coded, table-based interactive menu
+- 🔌 **Auto-Detection**: Automatically identifies active network interface
 
-## Requirements
+## 📋 Requirements
 
-- Linux system with systemd-resolved
-- Root/sudo privileges
-- Bash shell
+- **Linux**: Ubuntu 17.10+ or any system with NetPlan (recommended), or systemd-resolved (fallback)
+- **Privileges**: Root/sudo access required
+- **Shell**: Bash
+- **Utilities**: `ip`, `grep`, `awk`, `sed` (pre-installed on most systems)
 
-## Installation
+## 🚀 Installation
 
-### System-wide Installation (Recommended)
-
-Install DNS Manager to `/usr/local/bin/` for easy access from anywhere in your system:
+### Option 1: System-wide Installation (Recommended)
 
 ```bash
 # Clone the repository
 git clone https://github.com/USFAkbari/Set_Shekan_DNS.git
 cd Set_Shekan_DNS
 
-# Copy to /usr/local/bin/
-sudo cp dnsManager /usr/local/bin/dnsManager
-
-# Make it executable
+# Install to /usr/local/bin/
+sudo cp dnsManager.sh /usr/local/bin/dnsManager
 sudo chmod +x /usr/local/bin/dnsManager
 ```
 
-After installation, you can run DNS Manager from anywhere:
-
-```bash
-dnsManager
-```
-
-### Download and Install (One-Liner)
-
-Download and install directly to `/usr/local/bin/`:
-
-```bash
-sudo curl -sSL https://raw.githubusercontent.com/USFAkbari/Set_Shekan_DNS/main/dnsManager -o /usr/local/bin/dnsManager && sudo chmod +x /usr/local/bin/dnsManager
-```
-
-Then run:
-
-```bash
-dnsManager
-```
-
-### Run Without Installing
-
-If you prefer to run the script without installing:
-
-```bash
-# Clone the repository
-git clone https://github.com/USFAkbari/Set_Shekan_DNS.git
-cd Set_Shekan_DNS
-
-# Run directly (requires sudo)
-sudo ./dnsManager
-```
-
-Or download and run directly:
-
-```bash
-curl -sSL https://raw.githubusercontent.com/USFAkbari/Set_Shekan_DNS/main/dnsManager -o /tmp/dnsManager && chmod +x /tmp/dnsManager && sudo /tmp/dnsManager
-```
-
-### Uninstallation
-
-To remove DNS Manager from your system:
-
-```bash
-sudo rm /usr/local/bin/dnsManager
-```
-
-### Menu Options
-
-When you run the script, you'll see an interactive, color-coded menu:
-
-```text
-╔═══════════════════════════════════════════════════════╗
-║           DNS Manager - System Configuration         ║
-╚═══════════════════════════════════════════════════════╝
-
-Iranian DNS Services:
-  1) Shekan Pro DNS        (178.22.122.101, 185.51.200.1)
-  2) Shekan Free DNS       (178.22.122.100, 185.51.200.2)
-  3) Arvan Cloud DNS       (217.218.127.127, 217.218.155.155)
-
-International DNS Services:
-  4) Google Public DNS     (8.8.8.8, 8.8.4.4)
-  5) Cloudflare DNS        (1.1.1.1, 1.0.0.1)
-  6) Quad9 DNS             (9.9.9.9, 149.112.112.112) - Malware Protection
-  7) OpenDNS               (208.67.222.222, 208.67.220.220)
-  8) AdGuard DNS           (94.140.14.14, 94.140.15.15) - Ad Blocking
-
-System Management:
-  9) Roll back to original DNS settings
-
-═══════════════════════════════════════════════════════
-Choose an option (1-9):
-```
-
-### DNS Options Details
-
-#### Iranian DNS Services
-
-1. **Shekan Pro DNS** - Premium Shekan service with fallback to Google DNS
-2. **Shekan Free DNS** - Free Shekan service with fallback to Google DNS
-3. **Arvan Cloud DNS** - Iranian CDN and cloud provider with fallback to Cloudflare
-
-#### International DNS Services
-
-1. **Google Public DNS** - Google's fast and reliable DNS service
-2. **Cloudflare DNS** - Privacy-focused DNS with excellent performance
-3. **Quad9 DNS** - Security-focused DNS with built-in malware blocking
-4. **OpenDNS** - Cisco's DNS with filtering capabilities
-5. **AdGuard DNS** - DNS with built-in ad and tracker blocking
-
-#### System Management
-
-1. **Roll back DNS** - Restores original DNS configuration from backup or applies system defaults
-
-## What the Script Does
-
-1. **Backup Creation**: Automatically creates a backup of `/etc/systemd/resolved.conf` at `/etc/systemd/resolved.conf.backup` before making changes
-2. **DNS Configuration**: Updates the DNS settings in systemd-resolved configuration
-3. **Service Management**: Restarts the systemd-resolved service to apply changes
-4. **Symlink Management**: Ensures `/etc/resolv.conf` is properly linked to systemd-resolved
-
-## Important Notes
-
-- ⚠️ **Root Access Required**: This script modifies system files and requires sudo/root privileges
-- 💾 **Backup Safety**: The script automatically creates backups, but it's always good practice to have your own backup
-- 🔄 **Service Restart**: The script restarts `systemd-resolved` service, which may briefly interrupt DNS resolution
-- 📝 **Configuration File**: The script modifies `/etc/systemd/resolved.conf`
-
-## Troubleshooting
-
-### Permission Denied
-
-If you get a permission denied error, make sure you're running with sudo:
+Run from anywhere:
 
 ```bash
 sudo dnsManager
 ```
 
-### systemd-resolved Not Running
-
-If systemd-resolved is not running on your system, you may need to enable it:
+### Option 2: One-Liner Install
 
 ```bash
-sudo systemctl enable systemd-resolved
-sudo systemctl start systemd-resolved
+sudo curl -sSL https://raw.githubusercontent.com/USFAkbari/Set_Shekan_DNS/main/dnsManager.sh -o /usr/local/bin/dnsManager && sudo chmod +x /usr/local/bin/dnsManager
 ```
 
-### Verify DNS Settings
-
-To verify your DNS settings after running the script:
+### Option 3: Run Without Installing
 
 ```bash
-systemd-resolve --status
-# or
+git clone https://github.com/USFAkbari/Set_Shekan_DNS.git
+cd Set_Shekan_DNS
+sudo ./dnsManager.sh
+```
+
+## 📖 Menu Overview
+
+When you run the script, you'll see an interactive menu with live DNS status:
+
+```
+╔═════════════════════════════════════════════════════════════════════════════════╗
+║                    DNS Manager - NetPlan Configuration                          ║
+╚═════════════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────── Current DNS Configuration ───────────────────────────┐
+│ Interface: eth0                    │ Method: NetPlan                             │
+│ Primary:   1.1.1.1                 │ Status: ● Active                            │
+│ Secondary: 1.0.0.1                 │                                             │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+ ┌── Iranian DNS ──┐   ┌── International DNS ─────────┐   ┌── VPN DNS ───┐
+ │ 1) Shekan Pro   │   │ 4) Google                    │   │ 9) ExpressVPN│
+ │ 2) Shekan Free  │   │ 5) Cloudflare                │   └──────────────┘
+ │ 3) Arvan Cloud  │   │ 6) Quad9 (Malware Block)     │
+ └─────────────────┘   │ 7) OpenDNS                   │
+                       │ 8) AdGuard (Ad Block)        │
+                       └───────────────────────────────┘
+
+ ┌── System Management ────────────────────────────────────────────────────────────┐
+ │ N) Remove/Deactivate NetPlan DNS   R) Reset resolv.conf to default              │
+ │ B) Rollback to original settings   0) Exit                                      │
+ └─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+## 📡 Supported DNS Servers
+
+### Iranian DNS Services
+
+| Provider | Primary | Secondary | Notes |
+|----------|---------|-----------|-------|
+| Shekan Pro | 178.22.122.101 | 185.51.200.1 | Premium anti-censorship |
+| Shekan Free | 178.22.122.100 | 185.51.200.2 | Free tier |
+| Arvan Cloud | 217.218.127.127 | 217.218.155.155 | Iranian CDN provider |
+
+### International DNS Services
+
+| Provider | Primary | Secondary | Features |
+|----------|---------|-----------|----------|
+| Google | 8.8.8.8 | 8.8.4.4 | Fast, reliable |
+| Cloudflare | 1.1.1.1 | 1.0.0.1 | Privacy-focused, fastest |
+| Quad9 | 9.9.9.9 | 149.112.112.112 | Malware blocking |
+| OpenDNS | 208.67.222.222 | 208.67.220.220 | Family filter options |
+| AdGuard | 94.140.14.14 | 94.140.15.15 | Ad & tracker blocking |
+
+### VPN DNS
+
+| Provider | Primary | Secondary | Notes |
+|----------|---------|-----------|-------|
+| ExpressVPN | 208.67.222.222 | 208.67.220.220 | Uses OpenDNS (recommended by ExpressVPN) |
+
+## ⚙️ How It Works
+
+### NetPlan Method (Primary)
+
+1. **Detects** active network interface (e.g., `eth0`, `wlan0`)
+2. **Creates** configuration at `/etc/netplan/99-dns-manager.yaml`
+3. **Applies** using `netplan apply`
+4. **Overrides** DHCP DNS with custom settings
+
+### systemd-resolved Method (Fallback)
+
+Used when NetPlan is not available:
+
+1. **Backs up** `/etc/systemd/resolved.conf`
+2. **Modifies** DNS settings directly
+3. **Restarts** systemd-resolved service
+
+## 🔧 System Management Options
+
+### Remove/Deactivate NetPlan DNS (N)
+
+Specifically removes the DNS Manager's NetPlan configuration:
+
+- Shows current NetPlan DNS configuration before removal
+- Removes `/etc/netplan/99-dns-manager.yaml`
+- Applies NetPlan changes
+- DNS reverts to DHCP-provided or system default servers
+
+### Reset to Default (R)
+
+Completely removes all DNS Manager configurations and restores system defaults:
+
+- Removes `/etc/netplan/99-dns-manager.yaml`
+- Clears custom DNS entries from systemd-resolved
+- Restores default `resolv.conf` symlink
+
+### Rollback (B)
+
+Reverts to the original DNS configuration that was backed up:
+
+- Removes NetPlan configuration
+- Restores backed-up `resolved.conf`
+- Ideal for undoing recent changes
+
+## 📚 Documentation
+
+For detailed information about NetPlan and how this tool integrates with it, see:
+
+- [NetPlan Guide](docs/netplan-guide.md) - Comprehensive NetPlan documentation
+
+## 🔍 Troubleshooting
+
+### Permission Denied
+
+```bash
+sudo dnsManager
+```
+
+### Verify Current DNS
+
+```bash
+# For NetPlan systems
 resolvectl status
+
+# View generated config
+cat /etc/netplan/99-dns-manager.yaml
 ```
 
-### Manual Rollback
+### Manual Removal
 
-If you need to manually restore the backup:
+If you need to manually remove DNS Manager configurations:
+
+**NetPlan:**
+
+```bash
+sudo rm /etc/netplan/99-dns-manager.yaml
+sudo netplan apply
+```
+
+**systemd-resolved:**
 
 ```bash
 sudo cp /etc/systemd/resolved.conf.backup /etc/systemd/resolved.conf
 sudo systemctl restart systemd-resolved
 ```
 
-## License
+## 📄 License
 
 This script is provided as-is for free use.
 
-## Contributing
+## 🤝 Contributing
 
 Contributions, issues, and feature requests are welcome!
 
-## Disclaimer
+## ⚠️ Disclaimer
 
 Use this script at your own risk. Always ensure you have backups of important system configurations before making changes.
