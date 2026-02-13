@@ -211,6 +211,15 @@ apply_dns_netplan() {
   
   local iface_type=$(get_interface_type "$iface")
   
+  # NetPlan does not support Wi-Fi interfaces with DNS-only overrides (requires access-points).
+  # Use systemd-resolved directly for wifis to avoid "NetPlan configuration is invalid" error.
+  if [ "$iface_type" = "wifis" ]; then
+    print_message "$CYAN" "► [$TIMESTAMP] Detected interface: $iface (Wi-Fi)"
+    print_message "$YELLOW" "► Wi-Fi detected; using systemd-resolved for DNS (NetPlan has limited support for Wi-Fi)."
+    apply_dns_resolved "$dns_primary" "$dns_secondary" "$dns_name" "$fallback_dns"
+    return
+  fi
+  
   print_message "$CYAN" "► [$TIMESTAMP] Detected interface: $iface ($iface_type)"
   print_message "$YELLOW" "► [$TIMESTAMP] Configuring DNS via NetPlan..."
   print_message "$DIM" "  Primary: $dns_primary | Secondary: $dns_secondary"
@@ -255,7 +264,9 @@ EOF
   if ! netplan generate >/dev/null 2>&1; then
       print_message "$RED" "✗ [$TIMESTAMP] NetPlan configuration is invalid."
       rm -f "$NETPLAN_FILE"
-      return 1
+      print_message "$YELLOW" "► Falling back to systemd-resolved..."
+      apply_dns_resolved "$dns_primary" "$dns_secondary" "$dns_name" "$fallback_dns"
+      return
   fi
 
   # Capture output of netplan apply to show error if it fails
