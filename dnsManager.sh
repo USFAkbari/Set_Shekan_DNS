@@ -6,7 +6,7 @@
 # Primary: NetPlan | Fallback: systemd-resolved
 # ════════════════════════════════════════════════════════════════════════════
 
-# Configuration paths
+# Configuration paths (99- prefix ensures DNS config wins when NetPlan merges multiple files)
 NETPLAN_FILE="/etc/netplan/99-dns-manager.yaml"
 SYSTEMD_CONF="/etc/systemd/resolved.conf"
 BACKUP_CONF="/etc/systemd/resolved.conf.backup"
@@ -24,6 +24,12 @@ WHITE='\033[1;37m'
 DIM='\033[2m'
 NC='\033[0m' # No Color
 BOLD='\033[1m'
+
+# Check for root privileges
+if [ "$EUID" -ne 0 ]; then
+  echo -e "${RED}✗ This script must be run as root.${NC}"
+  exit 1
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Utility Functions
@@ -180,7 +186,7 @@ create_backup() {
     cp "$SYSTEMD_CONF" "$BACKUP_CONF"
     print_message "$GREEN" "✓ [$TIMESTAMP] Backup created at $BACKUP_CONF"
   else
-    print_message "$DIM" "ℹ [$TIMESTAMP] Backup already exists or source not found"
+    print_message "$GREEN" "✓ [$TIMESTAMP] Backup already exists, skipping creation to preserve original state."
   fi
 }
 
@@ -209,33 +215,62 @@ apply_dns_netplan() {
   print_message "$YELLOW" "► [$TIMESTAMP] Configuring DNS via NetPlan..."
   print_message "$DIM" "  Primary: $dns_primary | Secondary: $dns_secondary"
   
-  # Build DNS list
-  local dns_list="$dns_primary, $dns_secondary"
+  # Build DNS array for NetPlan (YAML array format)
+  local dns_array="\"$dns_primary\", \"$dns_secondary\""
   if [ -n "$fallback_dns" ]; then
-    local formatted_fallback=$(echo "$fallback_dns" | sed 's/ /, /g')
-    dns_list="$dns_list, $formatted_fallback"
+    # Convert space-separated fallback DNS to quoted comma-separated format
+    for fb_dns in $fallback_dns; do
+      dns_array="$dns_array, \"$fb_dns\""
+    done
   fi
   
   # Create NetPlan configuration
+  # dhcp4: true required so interface gets IP via DHCP; dhcp4-overrides use-dns: false prevents DHCP DNS from overriding our nameservers
   cat <<EOF > "$NETPLAN_FILE"
 # DNS Manager Configuration
 # Generated: $TIMESTAMP
 # DNS Provider: $dns_name
 network:
   version: 2
+  renderer: NetworkManager
   $iface_type:
     $iface:
+      dhcp4: true
       nameservers:
-        addresses: [$dns_list]
+        addresses: [$dns_array]
         search: []
       dhcp4-overrides:
         use-dns: false
 EOF
 
+  # Set correct permissions for NetPlan file (600 is required)
+  chmod 600 "$NETPLAN_FILE"
+  
+  # Remove legacy NetPlan DNS file if present (migration from 01-dns-manager.yaml to 99-dns-manager.yaml)
+  rm -f /etc/netplan/01-dns-manager.yaml
+
   print_message "$YELLOW" "► [$TIMESTAMP] Applying NetPlan configuration..."
   
-  if netplan apply 2>/dev/null; then
+  # Test configuration with generate first
+  if ! netplan generate >/dev/null 2>&1; then
+      print_message "$RED" "✗ [$TIMESTAMP] NetPlan configuration is invalid."
+      rm -f "$NETPLAN_FILE"
+      return 1
+  fi
+
+  # Capture output of netplan apply to show error if it fails
+  if output=$(netplan apply 2>&1); then
     print_message "$GREEN" "✓ [$TIMESTAMP] NetPlan configuration applied successfully!"
+    
+    # Restart systemd-resolved so it picks up new DNS from NetworkManager (avoids stale cache)
+    if systemctl restart systemd-resolved 2>/dev/null; then
+      print_message "$GREEN" "✓ [$TIMESTAMP] systemd-resolved restarted (DNS active)"
+    fi
+    
+    # Reload NetworkManager so it re-reads NetPlan-generated config and pushes DNS to systemd-resolved
+    if command -v nmcli &>/dev/null && nmcli general reload 2>/dev/null; then
+      print_message "$GREEN" "✓ [$TIMESTAMP] NetworkManager reloaded"
+    fi
     
     # Ensure resolv.conf symlink is correct
     if [ ! -L "$RESOLV_CONF" ] || [ "$(readlink "$RESOLV_CONF")" != "/run/systemd/resolve/stub-resolv.conf" ]; then
@@ -247,6 +282,7 @@ EOF
     print_separator
   else
     print_message "$RED" "✗ [$TIMESTAMP] NetPlan apply failed. Reverting..."
+    print_message "$RED" "  Error details: $output"
     rm -f "$NETPLAN_FILE"
     apply_dns_resolved "$dns_primary" "$dns_secondary" "$dns_name" "$fallback_dns"
     return
@@ -412,7 +448,7 @@ remove_netplan_dns() {
   
   # Ensure resolv.conf symlink is correct
   print_message "$YELLOW" "► [$TIMESTAMP] Verifying resolv.conf symlink..."
-  ln -sf /run/systemd/resolve/stub-resolv.conf "$RESOLV_CONF"
+  ln -sf /run/systemd/resolve/resolv.conf "$RESOLV_CONF"
   
   # Restart systemd-resolved to pick up changes
   if systemctl restart systemd-resolved 2>/dev/null; then
@@ -469,8 +505,8 @@ reset_resolv_conf() {
   fi
   
   # Ensure proper symlink
-  print_message "$YELLOW" "► [$TIMESTAMP] Restoring resolv.conf symlink..."
-  ln -sf /run/systemd/resolve/stub-resolv.conf "$RESOLV_CONF"
+  print_message "$YELLOW" "► [$TIMESTAMP] Settling resolv.conf symlink to upstream..."
+  ln -sf /run/systemd/resolve/resolv.conf "$RESOLV_CONF"
   print_message "$GREEN" "✓ [$TIMESTAMP] resolv.conf symlink restored"
   
   if [ "$changes_made" = true ]; then
