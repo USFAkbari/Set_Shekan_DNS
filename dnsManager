@@ -1,12 +1,14 @@
 #!/bin/bash
 
 # ════════════════════════════════════════════════════════════════════════════
-# DNS Manager - NetPlan Configuration Tool
+# DNS Manager v2.0 - DNS Configuration Tool
 # Supports Iranian DNS (Shekan, Arvan) and Major International DNS Services
-# Primary: NetPlan | Fallback: systemd-resolved
+# Methods: NetPlan | systemd-resolved (resolv.conf)
 # ════════════════════════════════════════════════════════════════════════════
 
-# Configuration paths (99- prefix ensures DNS config wins when NetPlan merges multiple files)
+VERSION="2.0.0"
+
+# Configuration paths
 NETPLAN_FILE="/etc/netplan/99-dns-manager.yaml"
 SYSTEMD_CONF="/etc/systemd/resolved.conf"
 BACKUP_CONF="/etc/systemd/resolved.conf.backup"
@@ -22,12 +24,12 @@ CYAN='\033[0;36m'
 MAGENTA='\033[0;35m'
 WHITE='\033[1;37m'
 DIM='\033[2m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 BOLD='\033[1m'
 
 # Check for root privileges
 if [ "$EUID" -ne 0 ]; then
-  echo -e "${RED}✗ This script must be run as root.${NC}"
+  echo -e "${RED}✗ This script must be run as root (sudo).${NC}"
   exit 1
 fi
 
@@ -35,14 +37,14 @@ fi
 # Utility Functions
 # ─────────────────────────────────────────────────────────────────────────────
 
-print_message() {
+print_msg() {
   local color=$1
   local message=$2
   echo -e "${color}${message}${NC}"
 }
 
-print_separator() {
-  echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+print_line() {
+  echo -e "${BLUE}──────────────────────────────────────────────────────────────${NC}"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -70,111 +72,197 @@ get_interface_type() {
   fi
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DNS Information Functions
-# ─────────────────────────────────────────────────────────────────────────────
-
-get_current_dns() {
-  local dns_primary=""
-  local dns_secondary=""
-  
-  # Try resolvectl first
-  if command -v resolvectl &> /dev/null; then
-    local dns_list=$(resolvectl status 2>/dev/null | grep -A 10 "DNS Servers" | grep -E "^\s+[0-9]" | head -2)
-    dns_primary=$(echo "$dns_list" | head -1 | awk '{print $1}')
-    dns_secondary=$(echo "$dns_list" | tail -1 | awk '{print $1}')
+validate_ipv4() {
+  local ip=$1
+  # Check format
+  if ! [[ $ip =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]]; then
+    return 1
   fi
-  
-  # Fallback to resolv.conf
-  if [ -z "$dns_primary" ]; then
-    dns_primary=$(grep "^nameserver" /etc/resolv.conf 2>/dev/null | head -1 | awk '{print $2}')
-    dns_secondary=$(grep "^nameserver" /etc/resolv.conf 2>/dev/null | sed -n '2p' | awk '{print $2}')
-  fi
-  
-  echo "${dns_primary:-N/A}|${dns_secondary:-N/A}"
+  # Check each octet range (0-255)
+  local i
+  for i in 1 2 3 4; do
+    local octet="${BASH_REMATCH[$i]}"
+    if (( octet > 255 )); then
+      return 1
+    fi
+  done
+  return 0
 }
 
-get_config_method() {
-  if [ -f "$NETPLAN_FILE" ]; then
-    echo "NetPlan"
-  elif [ -f "$BACKUP_CONF" ]; then
-    echo "systemd-resolved"
-  else
-    echo "System Default"
-  fi
-}
-
-get_dns_status() {
-  if check_systemd_resolved; then
-    echo -e "${GREEN}● Active${NC}"
-  else
-    echo -e "${RED}● Inactive${NC}"
-  fi
+# Try to identify DNS provider name from known IPs
+identify_dns_provider() {
+  local ip=$1
+  case "$ip" in
+    178.22.122.101|185.51.200.1)   echo "Shekan Pro" ;;
+    178.22.122.100|185.51.200.2)   echo "Shekan Free" ;;
+    217.218.127.127|217.218.155.155) echo "Arvan Cloud" ;;
+    8.8.8.8|8.8.4.4)              echo "Google DNS" ;;
+    1.1.1.1|1.0.0.1)              echo "Cloudflare" ;;
+    9.9.9.9|149.112.112.112)      echo "Quad9" ;;
+    208.67.222.222|208.67.220.220) echo "OpenDNS" ;;
+    94.140.14.14|94.140.15.15)    echo "AdGuard" ;;
+    4.2.2.4|4.2.2.1)              echo "Level3" ;;
+    127.0.0.53)                    echo "systemd-stub" ;;
+    *)                             echo "" ;;
+  esac
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Display Functions
 # ─────────────────────────────────────────────────────────────────────────────
 
-show_dns_table() {
-  local interface=$(get_active_interface)
-  local dns_info=$(get_current_dns)
-  local dns_primary=$(echo "$dns_info" | cut -d'|' -f1)
-  local dns_secondary=$(echo "$dns_info" | cut -d'|' -f2)
-  local method=$(get_config_method)
-  local status=$(get_dns_status)
-  
+show_header() {
+  clear
   echo ""
-  echo -e "${CYAN}┌─────────────────────────── Current DNS Configuration ───────────────────────────┐${NC}"
-  printf "${CYAN}│${NC} %-20s ${WHITE}%-20s${NC} ${CYAN}│${NC} %-15s %-20s ${CYAN}│${NC}\n" "Interface:" "${interface:-N/A}" "Method:" "$method"
-  printf "${CYAN}│${NC} %-20s ${GREEN}%-20s${NC} ${CYAN}│${NC} %-15s $status ${CYAN}│${NC}\n" "Primary DNS:" "$dns_primary" "Status:"
-  printf "${CYAN}│${NC} %-20s ${GREEN}%-20s${NC} ${CYAN}│${NC} %-36s ${CYAN}│${NC}\n" "Secondary DNS:" "$dns_secondary" ""
-  echo -e "${CYAN}└─────────────────────────────────────────────────────────────────────────────────┘${NC}"
+  echo -e "${BLUE}╔══════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${BLUE}║${NC}${BOLD}${WHITE}           🌐  DNS Manager  v${VERSION}                          ${NC}${BLUE}║${NC}"
+  echo -e "${BLUE}╚══════════════════════════════════════════════════════════════╝${NC}"
+}
+
+show_current_dns_status() {
+  local interface=$(get_active_interface)
+
+  echo ""
+  echo -e "${CYAN}┌── Current DNS Status ────────────────────────────────────────┐${NC}"
+  echo -e "${CYAN}│${NC} ${WHITE}Interface:${NC} ${GREEN}${interface:-N/A}${NC}"
+  echo -e "${CYAN}│${NC}"
+
+  # ── NetPlan Config ──
+  if [ -f "$NETPLAN_FILE" ]; then
+    local np_dns=$(grep -A5 'addresses:' "$NETPLAN_FILE" 2>/dev/null | head -1 | sed 's/.*\[//;s/\].*//;s/"//g')
+    local np_provider=""
+    local first_ip=$(echo "$np_dns" | cut -d',' -f1 | xargs)
+    if [ -n "$first_ip" ]; then
+      np_provider=$(identify_dns_provider "$first_ip")
+    fi
+    echo -e "${CYAN}│${NC} ${YELLOW}NetPlan${NC} (${DIM}${NETPLAN_FILE}${NC}):"
+    if [ -n "$np_provider" ]; then
+      echo -e "${CYAN}│${NC}   DNS: ${GREEN}${np_dns}${NC}  ${DIM}(${np_provider})${NC}"
+    else
+      echo -e "${CYAN}│${NC}   DNS: ${GREEN}${np_dns}${NC}"
+    fi
+  else
+    echo -e "${CYAN}│${NC} ${YELLOW}NetPlan${NC}: ${DIM}No DNS Manager config found${NC}"
+  fi
+
+  echo -e "${CYAN}│${NC}"
+
+  # ── resolv.conf ──
+  echo -e "${CYAN}│${NC} ${YELLOW}resolv.conf${NC} (${DIM}${RESOLV_CONF}${NC}):"
+  local resolv_ns=$(grep "^nameserver" "$RESOLV_CONF" 2>/dev/null)
+  if [ -n "$resolv_ns" ]; then
+    while IFS= read -r line; do
+      local ns_ip=$(echo "$line" | awk '{print $2}')
+      local ns_name=$(identify_dns_provider "$ns_ip")
+      if [ -n "$ns_name" ]; then
+        echo -e "${CYAN}│${NC}   ${GREEN}${line}${NC}  ${DIM}(${ns_name})${NC}"
+      else
+        echo -e "${CYAN}│${NC}   ${GREEN}${line}${NC}"
+      fi
+    done <<< "$resolv_ns"
+  else
+    echo -e "${CYAN}│${NC}   ${DIM}No nameservers found${NC}"
+  fi
+
+  echo -e "${CYAN}│${NC}"
+
+  # ── Resolvectl ──
+  if command -v resolvectl &> /dev/null; then
+    echo -e "${CYAN}│${NC} ${YELLOW}Resolvectl Status${NC}:"
+    local dns_servers=$(resolvectl status 2>/dev/null | grep -A 10 "DNS Servers" | grep -E "^\s+[0-9]" | head -4)
+    if [ -n "$dns_servers" ]; then
+      while IFS= read -r line; do
+        local srv_ip=$(echo "$line" | xargs)
+        local srv_name=$(identify_dns_provider "$srv_ip")
+        if [ -n "$srv_name" ]; then
+          echo -e "${CYAN}│${NC}   ${GREEN}${srv_ip}${NC}  ${DIM}(${srv_name})${NC}"
+        else
+          echo -e "${CYAN}│${NC}   ${GREEN}${srv_ip}${NC}"
+        fi
+      done <<< "$dns_servers"
+    else
+      echo -e "${CYAN}│${NC}   ${DIM}No DNS servers reported${NC}"
+    fi
+  fi
+
+  # ── systemd-resolved status ──
+  echo -e "${CYAN}│${NC}"
+  if check_systemd_resolved; then
+    echo -e "${CYAN}│${NC} ${WHITE}systemd-resolved:${NC} ${GREEN}● Active${NC}"
+  else
+    echo -e "${CYAN}│${NC} ${WHITE}systemd-resolved:${NC} ${RED}● Inactive${NC}"
+  fi
+
+  echo -e "${CYAN}└──────────────────────────────────────────────────────────────┘${NC}"
 }
 
 show_menu() {
-  clear
+  show_header
+  show_current_dns_status
+
   echo ""
-  echo -e "${BLUE}╔═════════════════════════════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${BLUE}║${NC}${BOLD}${WHITE}                    DNS Manager - NetPlan Configuration                         ${NC}${BLUE}║${NC}"
-  echo -e "${BLUE}╚═════════════════════════════════════════════════════════════════════════════════╝${NC}"
-  
-  show_dns_table
-  
+  echo -e " ${GREEN}── Iranian DNS ──────────────${NC}    ${YELLOW}── International DNS ────────${NC}"
+  echo -e "  ${WHITE}1)${NC} Shekan Pro                ${WHITE}5)${NC} Cloudflare"
+  echo -e "  ${WHITE}2)${NC} Shekan Free               ${WHITE}6)${NC} Quad9 ${DIM}(Malware Block)${NC}"
+  echo -e "  ${WHITE}3)${NC} Arvan Cloud               ${WHITE}7)${NC} OpenDNS"
+  echo -e "  ${WHITE}4)${NC} Google DNS                ${WHITE}8)${NC} AdGuard ${DIM}(Ad Block)${NC}"
+  echo -e "                               ${WHITE}9)${NC} Level3 ${DIM}(4.2.2.4)${NC}"
   echo ""
-  echo -e "${GREEN}┌─── Iranian DNS Services ───┐${NC}  ${YELLOW}┌─── International DNS ──────────┐${NC}  ${MAGENTA}┌─── VPN DNS ───┐${NC}"
-  echo -e "${GREEN}│${NC} ${WHITE}1)${NC} Shekan Pro             ${GREEN}│${NC}  ${YELLOW}│${NC} ${WHITE}4)${NC} Google DNS               ${YELLOW}│${NC}  ${MAGENTA}│${NC} ${WHITE}9)${NC} ExpressVPN ${MAGENTA}│${NC}"
-  echo -e "${GREEN}│${NC} ${WHITE}2)${NC} Shekan Free            ${GREEN}│${NC}  ${YELLOW}│${NC} ${WHITE}5)${NC} Cloudflare               ${YELLOW}│${NC}  ${MAGENTA}└───────────────┘${NC}"
-  echo -e "${GREEN}│${NC} ${WHITE}3)${NC} Arvan Cloud            ${GREEN}│${NC}  ${YELLOW}│${NC} ${WHITE}6)${NC} Quad9 (Malware Block)    ${YELLOW}│${NC}"
-  echo -e "${GREEN}└────────────────────────────┘${NC}  ${YELLOW}│${NC} ${WHITE}7)${NC} OpenDNS                  ${YELLOW}│${NC}"
-  echo -e "                               ${YELLOW}│${NC} ${WHITE}8)${NC} AdGuard (Ad Block)       ${YELLOW}│${NC}"
-  echo -e "                               ${YELLOW}└─────────────────────────────────┘${NC}"
+  echo -e "  ${MAGENTA}C)${NC} ${MAGENTA}Custom DNS${NC} ${DIM}(enter your own)${NC}"
+
   echo ""
-  echo -e "${CYAN}┌─── System Management ───────────────────────────────────────────────────────────┐${NC}"
-  echo -e "${CYAN}│${NC} ${WHITE}N)${NC} Remove/Deactivate NetPlan DNS   ${WHITE}R)${NC} Reset resolv.conf to default          ${CYAN}│${NC}"
-  echo -e "${CYAN}│${NC} ${WHITE}B)${NC} Rollback to original settings   ${WHITE}0)${NC} Exit                                  ${CYAN}│${NC}"
-  echo -e "${CYAN}└─────────────────────────────────────────────────────────────────────────────────┘${NC}"
+  echo -e " ${CYAN}── System Management ────────────────────────────────────────${NC}"
+  echo -e "  ${WHITE}S)${NC} System Management ${DIM}(view, edit, disable, delete, rollback)${NC}"
+  echo -e "  ${WHITE}0)${NC} Exit"
+
   echo ""
 }
 
-show_dns_details() {
+# ─────────────────────────────────────────────────────────────────────────────
+# Method Selection (Step 2)
+# ─────────────────────────────────────────────────────────────────────────────
+
+choose_apply_method() {
+  # Returns: "netplan" or "resolved"
   echo ""
-  echo -e "${BLUE}┌─── DNS Server Details ──────────────────────────────────────────────────────────┐${NC}"
-  echo -e "${BLUE}│${NC} ${GREEN}Iranian DNS:${NC}                                                                    ${BLUE}│${NC}"
-  echo -e "${BLUE}│${NC}   Shekan Pro   : 178.22.122.101, 185.51.200.1                                  ${BLUE}│${NC}"
-  echo -e "${BLUE}│${NC}   Shekan Free  : 178.22.122.100, 185.51.200.2                                  ${BLUE}│${NC}"
-  echo -e "${BLUE}│${NC}   Arvan Cloud  : 217.218.127.127, 217.218.155.155                              ${BLUE}│${NC}"
-  echo -e "${BLUE}│${NC}                                                                                ${BLUE}│${NC}"
-  echo -e "${BLUE}│${NC} ${YELLOW}International DNS:${NC}                                                              ${BLUE}│${NC}"
-  echo -e "${BLUE}│${NC}   Google       : 8.8.8.8, 8.8.4.4                                              ${BLUE}│${NC}"
-  echo -e "${BLUE}│${NC}   Cloudflare   : 1.1.1.1, 1.0.0.1                                              ${BLUE}│${NC}"
-  echo -e "${BLUE}│${NC}   Quad9        : 9.9.9.9, 149.112.112.112                                      ${BLUE}│${NC}"
-  echo -e "${BLUE}│${NC}   OpenDNS      : 208.67.222.222, 208.67.220.220                                ${BLUE}│${NC}"
-  echo -e "${BLUE}│${NC}   AdGuard      : 94.140.14.14, 94.140.15.15                                    ${BLUE}│${NC}"
-  echo -e "${BLUE}│${NC}                                                                                ${BLUE}│${NC}"
-  echo -e "${BLUE}│${NC} ${MAGENTA}VPN DNS:${NC}                                                                        ${BLUE}│${NC}"
-  echo -e "${BLUE}│${NC}   ExpressVPN   : 208.67.222.222, 208.67.220.220 (OpenDNS - Recommended)        ${BLUE}│${NC}"
-  echo -e "${BLUE}└─────────────────────────────────────────────────────────────────────────────────┘${NC}"
+  print_line
+  echo -e " ${BOLD}${WHITE}How do you want to apply DNS?${NC}"
+  print_line
+  echo ""
+
+  local netplan_available=false
+  if check_netplan_installed; then
+    netplan_available=true
+    echo -e "  ${WHITE}1)${NC} ${GREEN}NetPlan${NC}          ${DIM}(/etc/netplan/99-dns-manager.yaml)${NC}"
+  else
+    echo -e "  ${DIM}1) NetPlan          (not installed)${NC}"
+  fi
+
+  echo -e "  ${WHITE}2)${NC} ${GREEN}resolv.conf${NC}      ${DIM}(systemd-resolved /etc/systemd/resolved.conf)${NC}"
+  echo ""
+
+  while true; do
+    echo -n -e "  ${WHITE}Choose method [1/2]: ${NC}"
+    read -r method_choice
+
+    case "$method_choice" in
+      1)
+        if [ "$netplan_available" = true ]; then
+          echo "netplan"
+          return
+        else
+          print_msg "$YELLOW" "  ⚠ NetPlan is not installed. Please choose option 2."
+        fi
+        ;;
+      2)
+        echo "resolved"
+        return
+        ;;
+      *)
+        print_msg "$RED" "  ✗ Invalid choice. Enter 1 or 2."
+        ;;
+    esac
+  done
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -184,14 +272,12 @@ show_dns_details() {
 create_backup() {
   if [ ! -f "$BACKUP_CONF" ] && [ -f "$SYSTEMD_CONF" ]; then
     cp "$SYSTEMD_CONF" "$BACKUP_CONF"
-    print_message "$GREEN" "✓ [$TIMESTAMP] Backup created at $BACKUP_CONF"
-  else
-    print_message "$GREEN" "✓ [$TIMESTAMP] Backup already exists, skipping creation to preserve original state."
+    print_msg "$GREEN" "  ✓ Backup created at $BACKUP_CONF"
   fi
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NetPlan DNS Configuration (Primary Method)
+# NetPlan DNS Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 
 apply_dns_netplan() {
@@ -199,44 +285,43 @@ apply_dns_netplan() {
   local dns_secondary=$2
   local dns_name=$3
   local fallback_dns=$4
-  
+
   local iface=$(get_active_interface)
-  
+
   if [ -z "$iface" ]; then
-    print_message "$RED" "✗ Could not detect active network interface."
-    print_message "$YELLOW" "► Falling back to systemd-resolved method..."
+    print_msg "$RED" "  ✗ Could not detect active network interface."
+    print_msg "$YELLOW" "  ► Falling back to systemd-resolved..."
     apply_dns_resolved "$dns_primary" "$dns_secondary" "$dns_name" "$fallback_dns"
     return
   fi
-  
+
   local iface_type=$(get_interface_type "$iface")
-  
-  # NetPlan does not support Wi-Fi interfaces with DNS-only overrides (requires access-points).
-  # Use systemd-resolved directly for wifis to avoid "NetPlan configuration is invalid" error.
+
+  # Wi-Fi: NetPlan requires access-points config, fall back to resolved
   if [ "$iface_type" = "wifis" ]; then
-    print_message "$CYAN" "► [$TIMESTAMP] Detected interface: $iface (Wi-Fi)"
-    print_message "$YELLOW" "► Wi-Fi detected; using systemd-resolved for DNS (NetPlan has limited support for Wi-Fi)."
+    print_msg "$YELLOW" "  ► Wi-Fi detected — using systemd-resolved (NetPlan has limited Wi-Fi DNS support)."
     apply_dns_resolved "$dns_primary" "$dns_secondary" "$dns_name" "$fallback_dns"
     return
   fi
-  
-  print_message "$CYAN" "► [$TIMESTAMP] Detected interface: $iface ($iface_type)"
-  print_message "$YELLOW" "► [$TIMESTAMP] Configuring DNS via NetPlan..."
-  print_message "$DIM" "  Primary: $dns_primary | Secondary: $dns_secondary"
-  
-  # Build DNS array for NetPlan (YAML array format)
-  local dns_array="\"$dns_primary\", \"$dns_secondary\""
+
+  print_msg "$CYAN" "  ► Interface: $iface ($iface_type)"
+  print_msg "$YELLOW" "  ► Configuring DNS via NetPlan..."
+  print_msg "$DIM" "    Primary: $dns_primary | Secondary: $dns_secondary"
+
+  # Build DNS array
+  local dns_array="\"$dns_primary\""
+  if [ -n "$dns_secondary" ]; then
+    dns_array="$dns_array, \"$dns_secondary\""
+  fi
   if [ -n "$fallback_dns" ]; then
-    # Convert space-separated fallback DNS to quoted comma-separated format
     for fb_dns in $fallback_dns; do
       dns_array="$dns_array, \"$fb_dns\""
     done
   fi
-  
+
   # Create NetPlan configuration
-  # dhcp4: true required so interface gets IP via DHCP; dhcp4-overrides use-dns: false prevents DHCP DNS from overriding our nameservers
   cat <<EOF > "$NETPLAN_FILE"
-# DNS Manager Configuration
+# DNS Manager v${VERSION} Configuration
 # Generated: $TIMESTAMP
 # DNS Provider: $dns_name
 network:
@@ -252,56 +337,49 @@ network:
         use-dns: false
 EOF
 
-  # Set correct permissions for NetPlan file (600 is required)
   chmod 600 "$NETPLAN_FILE"
-  
-  # Remove legacy NetPlan DNS file if present (migration from 01-dns-manager.yaml to 99-dns-manager.yaml)
+
+  # Remove legacy file if present
   rm -f /etc/netplan/01-dns-manager.yaml
 
-  print_message "$YELLOW" "► [$TIMESTAMP] Applying NetPlan configuration..."
-  
-  # Test configuration with generate first
+  print_msg "$YELLOW" "  ► Applying NetPlan configuration..."
+
+  # Validate first
   if ! netplan generate >/dev/null 2>&1; then
-      print_message "$RED" "✗ [$TIMESTAMP] NetPlan configuration is invalid."
-      rm -f "$NETPLAN_FILE"
-      print_message "$YELLOW" "► Falling back to systemd-resolved..."
-      apply_dns_resolved "$dns_primary" "$dns_secondary" "$dns_name" "$fallback_dns"
-      return
+    print_msg "$RED" "  ✗ NetPlan configuration is invalid. Reverting..."
+    rm -f "$NETPLAN_FILE"
+    print_msg "$YELLOW" "  ► Falling back to systemd-resolved..."
+    apply_dns_resolved "$dns_primary" "$dns_secondary" "$dns_name" "$fallback_dns"
+    return
   fi
 
-  # Capture output of netplan apply to show error if it fails
+  # Apply
   if output=$(netplan apply 2>&1); then
-    print_message "$GREEN" "✓ [$TIMESTAMP] NetPlan configuration applied successfully!"
-    
-    # Restart systemd-resolved so it picks up new DNS from NetworkManager (avoids stale cache)
+    print_msg "$GREEN" "  ✓ NetPlan configuration applied!"
+
     if systemctl restart systemd-resolved 2>/dev/null; then
-      print_message "$GREEN" "✓ [$TIMESTAMP] systemd-resolved restarted (DNS active)"
+      print_msg "$GREEN" "  ✓ systemd-resolved restarted"
     fi
-    
-    # Reload NetworkManager so it re-reads NetPlan-generated config and pushes DNS to systemd-resolved
-    if command -v nmcli &>/dev/null && nmcli general reload 2>/dev/null; then
-      print_message "$GREEN" "✓ [$TIMESTAMP] NetworkManager reloaded"
+
+    if command -v nmcli &> /dev/null && nmcli general reload 2>/dev/null; then
+      print_msg "$GREEN" "  ✓ NetworkManager reloaded"
     fi
-    
-    # Ensure resolv.conf symlink is correct
+
+    # Ensure resolv.conf symlink
     if [ ! -L "$RESOLV_CONF" ] || [ "$(readlink "$RESOLV_CONF")" != "/run/systemd/resolve/stub-resolv.conf" ]; then
       ln -sf /run/systemd/resolve/stub-resolv.conf "$RESOLV_CONF"
     fi
-    
-    print_separator
-    print_message "$GREEN" "✓ $dns_name DNS configured successfully via NetPlan!"
-    print_separator
   else
-    print_message "$RED" "✗ [$TIMESTAMP] NetPlan apply failed. Reverting..."
-    print_message "$RED" "  Error details: $output"
+    print_msg "$RED" "  ✗ NetPlan apply failed: $output"
     rm -f "$NETPLAN_FILE"
+    print_msg "$YELLOW" "  ► Falling back to systemd-resolved..."
     apply_dns_resolved "$dns_primary" "$dns_secondary" "$dns_name" "$fallback_dns"
     return
   fi
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# systemd-resolved DNS Configuration (Fallback Method)
+# systemd-resolved DNS Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 
 apply_dns_resolved() {
@@ -309,45 +387,67 @@ apply_dns_resolved() {
   local dns_secondary=$2
   local dns_name=$3
   local fallback_dns=$4
-  
+
   create_backup
-  
-  print_message "$YELLOW" "► [$TIMESTAMP] Configuring DNS via systemd-resolved..."
-  print_message "$DIM" "  Primary: $dns_primary | Secondary: $dns_secondary"
-  
-  # Update DNS settings in resolved.conf
+
+  print_msg "$YELLOW" "  ► Configuring DNS via systemd-resolved..."
+  print_msg "$DIM" "    Primary: $dns_primary | Secondary: $dns_secondary"
+
+  # Update DNS settings
   sed -i '/^DNS=/d' "$SYSTEMD_CONF"
   sed -i '/^#DNS=/d' "$SYSTEMD_CONF"
   sed -i "/^\[Resolve\]/a DNS=$dns_primary $dns_secondary" "$SYSTEMD_CONF"
-  
+
   # Update FallbackDNS
   sed -i '/^FallbackDNS=/d' "$SYSTEMD_CONF"
   sed -i '/^#FallbackDNS=/d' "$SYSTEMD_CONF"
   sed -i "/^\[Resolve\]/a FallbackDNS=$fallback_dns" "$SYSTEMD_CONF"
-  
-  # Disable DNSStubListener for compatibility
+
+  # Disable DNSStubListener
   sed -i 's/^#DNSStubListener=.*/DNSStubListener=no/' "$SYSTEMD_CONF"
   sed -i 's/^DNSStubListener=.*/DNSStubListener=no/' "$SYSTEMD_CONF"
-  
-  print_message "$YELLOW" "► [$TIMESTAMP] Restarting systemd-resolved..."
-  
+
+  print_msg "$YELLOW" "  ► Restarting systemd-resolved..."
+
   if systemctl restart systemd-resolved; then
-    print_message "$GREEN" "✓ [$TIMESTAMP] systemd-resolved restarted successfully"
+    print_msg "$GREEN" "  ✓ systemd-resolved restarted"
   else
-    print_message "$RED" "✗ [$TIMESTAMP] Failed to restart systemd-resolved"
+    print_msg "$RED" "  ✗ Failed to restart systemd-resolved"
     return 1
   fi
-  
+
   # Update resolv.conf symlink
   ln -sf /run/systemd/resolve/stub-resolv.conf "$RESOLV_CONF"
-  
-  print_separator
-  print_message "$GREEN" "✓ $dns_name DNS configured successfully via systemd-resolved!"
-  print_separator
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Main Apply DNS Function
+# DNS Connectivity Test
+# ─────────────────────────────────────────────────────────────────────────────
+
+test_dns_connectivity() {
+  local dns_ip=$1
+  echo ""
+  print_msg "$YELLOW" "  ► Testing DNS connectivity..."
+
+  if command -v nslookup &> /dev/null; then
+    if nslookup google.com "$dns_ip" >/dev/null 2>&1; then
+      print_msg "$GREEN" "  ✓ DNS is working! (resolved google.com via $dns_ip)"
+    else
+      print_msg "$RED" "  ✗ DNS test failed. The server $dns_ip may not be reachable."
+    fi
+  elif command -v dig &> /dev/null; then
+    if dig @"$dns_ip" google.com +short +time=3 >/dev/null 2>&1; then
+      print_msg "$GREEN" "  ✓ DNS is working! (resolved google.com via $dns_ip)"
+    else
+      print_msg "$RED" "  ✗ DNS test failed. The server $dns_ip may not be reachable."
+    fi
+  else
+    print_msg "$DIM" "  ℹ nslookup/dig not found — skipping connectivity test."
+  fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main Apply DNS Function (with Step 2: method selection)
 # ─────────────────────────────────────────────────────────────────────────────
 
 apply_dns() {
@@ -355,21 +455,39 @@ apply_dns() {
   local dns_secondary=$2
   local dns_name=$3
   local fallback_dns=$4
-  
+
+  # Step 2: Choose method
+  local method
+  method=$(choose_apply_method)
+
   echo ""
-  print_separator
-  print_message "$CYAN" "Applying $dns_name DNS Configuration"
-  print_separator
-  
-  if check_netplan_installed; then
+  print_line
+  print_msg "$CYAN" "  Applying ${BOLD}${dns_name}${NC}${CYAN} DNS via ${method}..."
+  print_line
+  echo ""
+
+  if [ "$method" = "netplan" ]; then
     apply_dns_netplan "$dns_primary" "$dns_secondary" "$dns_name" "$fallback_dns"
   else
-    print_message "$YELLOW" "ℹ NetPlan not found. Using systemd-resolved."
     apply_dns_resolved "$dns_primary" "$dns_secondary" "$dns_name" "$fallback_dns"
   fi
-  
+
+  # Show result
   echo ""
-  show_dns_table
+  print_line
+  print_msg "$GREEN" "  ✓ ${BOLD}${dns_name}${NC}${GREEN} DNS configured successfully via ${method}!"
+  print_line
+
+  # Test connectivity
+  test_dns_connectivity "$dns_primary"
+
+  # Show final status
+  show_current_dns_status
+
+  echo ""
+  print_msg "$GREEN" "  ✓ Done! Exiting DNS Manager."
+  echo ""
+  exit 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -389,7 +507,7 @@ add_arvan_dns() {
 }
 
 add_google_dns() {
-  apply_dns "8.8.8.8" "8.8.4.4" "Google Public DNS" "1.1.1.1 1.0.0.1"
+  apply_dns "8.8.8.8" "8.8.4.4" "Google DNS" "1.1.1.1 1.0.0.1"
 }
 
 add_cloudflare_dns() {
@@ -397,7 +515,7 @@ add_cloudflare_dns() {
 }
 
 add_quad9_dns() {
-  apply_dns "9.9.9.9" "149.112.112.112" "Quad9 (Malware Blocking)" "8.8.8.8 1.1.1.1"
+  apply_dns "9.9.9.9" "149.112.112.112" "Quad9 (Malware Block)" "8.8.8.8 1.1.1.1"
 }
 
 add_opendns() {
@@ -405,193 +523,699 @@ add_opendns() {
 }
 
 add_adguard_dns() {
-  apply_dns "94.140.14.14" "94.140.15.15" "AdGuard DNS (Ad Blocking)" "8.8.8.8 1.1.1.1"
+  apply_dns "94.140.14.14" "94.140.15.15" "AdGuard (Ad Block)" "8.8.8.8 1.1.1.1"
 }
 
-add_expressvpn_dns() {
-  # ExpressVPN recommends OpenDNS servers for DNS configuration outside VPN
-  apply_dns "208.67.222.222" "208.67.220.220" "ExpressVPN (OpenDNS)" "8.8.8.8 1.1.1.1"
+add_level3_dns() {
+  apply_dns "4.2.2.4" "4.2.2.1" "Level3 (4.2.2.4)" "8.8.8.8 1.1.1.1"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NetPlan Remove/Deactivate, Reset and Rollback Functions
+# Custom DNS Function
 # ─────────────────────────────────────────────────────────────────────────────
 
-remove_netplan_dns() {
+add_custom_dns() {
   echo ""
-  print_separator
-  print_message "$YELLOW" "Removing/Deactivating NetPlan DNS Configuration"
-  print_separator
-  
+  print_line
+  echo -e "  ${BOLD}${WHITE}Enter Custom DNS Servers${NC}"
+  print_line
+  echo ""
+
+  # Primary DNS (required)
+  local dns_primary=""
+  while true; do
+    echo -n -e "  ${WHITE}Primary DNS IP: ${NC}"
+    read -r dns_primary
+    if validate_ipv4 "$dns_primary"; then
+      break
+    else
+      print_msg "$RED" "  ✗ Invalid IP address. Format: x.x.x.x (e.g., 8.8.8.8)"
+    fi
+  done
+
+  # Secondary DNS (optional)
+  local dns_secondary=""
+  echo -n -e "  ${WHITE}Secondary DNS IP ${DIM}(Enter to skip)${NC}: "
+  read -r dns_secondary
+  if [ -n "$dns_secondary" ]; then
+    if ! validate_ipv4 "$dns_secondary"; then
+      print_msg "$RED" "  ✗ Invalid IP. Skipping secondary DNS."
+      dns_secondary=""
+    fi
+  fi
+
+  echo ""
+  print_msg "$CYAN" "  Primary:   $dns_primary"
+  if [ -n "$dns_secondary" ]; then
+    print_msg "$CYAN" "  Secondary: $dns_secondary"
+  else
+    print_msg "$DIM" "  Secondary: (none)"
+  fi
+
+  apply_dns "$dns_primary" "$dns_secondary" "Custom DNS" "8.8.8.8 1.1.1.1"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# System Management Submenu & Functions
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Helper: finish system management operation and exit
+sysmgmt_done() {
+  local msg="$1"
+  echo ""
+  print_line
+  print_msg "$GREEN" "  ✓ $msg"
+  print_line
+  show_current_dns_status
+  echo ""
+  print_msg "$GREEN" "  ✓ Done! Exiting DNS Manager."
+  echo ""
+  exit 0
+}
+
+# ── NetPlan Operations ─────────────────────────────────────────────────────
+
+np_view() {
+  echo ""
+  print_line
+  print_msg "$CYAN" "  NetPlan DNS Configuration"
+  print_line
+
   if [ ! -f "$NETPLAN_FILE" ]; then
-    print_message "$YELLOW" "ℹ No NetPlan DNS configuration found at $NETPLAN_FILE"
-    print_message "$DIM" "  The system is not using DNS Manager's NetPlan configuration."
+    print_msg "$DIM" "  ℹ No DNS Manager NetPlan config found at $NETPLAN_FILE"
     echo ""
-    show_dns_table
     return
   fi
-  
-  # Show current NetPlan configuration before removal
-  print_message "$CYAN" "► Current NetPlan DNS configuration:"
-  echo -e "${DIM}"
-  cat "$NETPLAN_FILE" 2>/dev/null | sed 's/^/  /'
-  echo -e "${NC}"
-  
-  print_message "$YELLOW" "► [$TIMESTAMP] Removing NetPlan DNS configuration..."
-  rm -f "$NETPLAN_FILE"
-  
-  if [ $? -eq 0 ]; then
-    print_message "$GREEN" "✓ [$TIMESTAMP] NetPlan configuration file removed"
-  else
-    print_message "$RED" "✗ [$TIMESTAMP] Failed to remove NetPlan configuration file"
-    return 1
-  fi
-  
-  print_message "$YELLOW" "► [$TIMESTAMP] Applying NetPlan changes..."
-  
-  if netplan apply 2>/dev/null; then
-    print_message "$GREEN" "✓ [$TIMESTAMP] NetPlan changes applied successfully"
-  else
-    print_message "$RED" "✗ [$TIMESTAMP] Failed to apply NetPlan changes"
-    print_message "$YELLOW" "  Try running: sudo netplan apply"
-    return 1
-  fi
-  
-  # Ensure resolv.conf symlink is correct
-  print_message "$YELLOW" "► [$TIMESTAMP] Verifying resolv.conf symlink..."
-  ln -sf /run/systemd/resolve/resolv.conf "$RESOLV_CONF"
-  
-  # Restart systemd-resolved to pick up changes
-  if systemctl restart systemd-resolved 2>/dev/null; then
-    print_message "$GREEN" "✓ [$TIMESTAMP] systemd-resolved restarted"
-  fi
-  
-  print_separator
-  print_message "$GREEN" "✓ NetPlan DNS Configuration Removed!"
-  print_message "$DIM" "  DNS will now use system defaults or DHCP-provided servers."
-  print_separator
-  
-  echo ""
-  show_dns_table
-}
 
-reset_resolv_conf() {
   echo ""
-  print_separator
-  print_message "$YELLOW" "Resetting resolv.conf to System Default"
-  print_separator
-  
-  local changes_made=false
-  
-  # Remove NetPlan DNS configuration if exists
-  if [ -f "$NETPLAN_FILE" ]; then
-    print_message "$YELLOW" "► [$TIMESTAMP] Removing NetPlan DNS configuration..."
-    rm -f "$NETPLAN_FILE"
-    
-    if netplan apply 2>/dev/null; then
-      print_message "$GREEN" "✓ [$TIMESTAMP] NetPlan configuration removed"
-      changes_made=true
-    else
-      print_message "$RED" "✗ [$TIMESTAMP] Failed to apply NetPlan changes"
+  print_msg "$WHITE" "  File: ${DIM}$NETPLAN_FILE${NC}"
+  echo ""
+  echo -e "${DIM}"
+  cat "$NETPLAN_FILE" 2>/dev/null | sed 's/^/    /'
+  echo -e "${NC}"
+
+  # Parse DNS addresses
+  local np_dns=$(grep -A5 'addresses:' "$NETPLAN_FILE" 2>/dev/null | head -1 | sed 's/.*\[//;s/\].*//;s/"//g')
+  if [ -n "$np_dns" ]; then
+    print_msg "$GREEN" "  DNS addresses: $np_dns"
+    local first_ip=$(echo "$np_dns" | cut -d',' -f1 | xargs)
+    local provider=$(identify_dns_provider "$first_ip")
+    if [ -n "$provider" ]; then
+      print_msg "$DIM" "  Provider: $provider"
     fi
   fi
-  
-  # Restore systemd-resolved defaults
+  echo ""
+}
+
+np_edit() {
+  echo ""
+  print_line
+  print_msg "$CYAN" "  Edit NetPlan DNS Configuration"
+  print_line
+
+  if [ ! -f "$NETPLAN_FILE" ]; then
+    print_msg "$DIM" "  ℹ No NetPlan config found. Use a DNS option from the main menu first."
+    echo ""
+    return
+  fi
+
+  # Show current
+  local np_dns=$(grep -A5 'addresses:' "$NETPLAN_FILE" 2>/dev/null | head -1 | sed 's/.*\[//;s/\].*//;s/"//g')
+  print_msg "$DIM" "  Current DNS: $np_dns"
+  echo ""
+
+  # Prompt new primary
+  local dns_primary=""
+  while true; do
+    echo -n -e "  ${WHITE}New Primary DNS IP: ${NC}"
+    read -r dns_primary
+    if validate_ipv4 "$dns_primary"; then
+      break
+    else
+      print_msg "$RED" "  ✗ Invalid IP. Format: x.x.x.x"
+    fi
+  done
+
+  # Prompt new secondary
+  local dns_secondary=""
+  echo -n -e "  ${WHITE}New Secondary DNS IP ${DIM}(Enter to skip)${NC}: "
+  read -r dns_secondary
+  if [ -n "$dns_secondary" ] && ! validate_ipv4 "$dns_secondary"; then
+    print_msg "$RED" "  ✗ Invalid IP. Skipping secondary."
+    dns_secondary=""
+  fi
+
+  local iface=$(get_active_interface)
+  local iface_type=$(get_interface_type "$iface")
+
+  # Build DNS array
+  local dns_array="\"$dns_primary\""
+  if [ -n "$dns_secondary" ]; then
+    dns_array="$dns_array, \"$dns_secondary\""
+  fi
+
+  cat <<EOF > "$NETPLAN_FILE"
+# DNS Manager v${VERSION} Configuration
+# Generated: $TIMESTAMP
+# DNS Provider: Custom (edited)
+network:
+  version: 2
+  renderer: NetworkManager
+  $iface_type:
+    $iface:
+      dhcp4: true
+      nameservers:
+        addresses: [$dns_array]
+        search: []
+      dhcp4-overrides:
+        use-dns: false
+EOF
+
+  chmod 600 "$NETPLAN_FILE"
+
+  print_msg "$YELLOW" "  ► Validating configuration..."
+  if ! netplan generate >/dev/null 2>&1; then
+    print_msg "$RED" "  ✗ Configuration is invalid!"
+    return
+  fi
+
+  if netplan apply 2>/dev/null; then
+    systemctl restart systemd-resolved 2>/dev/null
+    sysmgmt_done "NetPlan DNS updated to: $dns_primary ${dns_secondary:+, $dns_secondary}"
+  else
+    print_msg "$RED" "  ✗ Failed to apply NetPlan changes."
+  fi
+}
+
+np_disable() {
+  echo ""
+  print_line
+  print_msg "$YELLOW" "  Disable NetPlan DNS Configuration"
+  print_line
+
+  if [ ! -f "$NETPLAN_FILE" ]; then
+    print_msg "$DIM" "  ℹ No NetPlan config to disable."
+    echo ""
+    return
+  fi
+
+  print_msg "$YELLOW" "  ► Disabling by renaming to .disabled..."
+  mv "$NETPLAN_FILE" "${NETPLAN_FILE}.disabled"
+
+  if [ $? -eq 0 ]; then
+    print_msg "$GREEN" "  ✓ Config moved to ${NETPLAN_FILE}.disabled"
+  else
+    print_msg "$RED" "  ✗ Failed to disable config."
+    return
+  fi
+
+  print_msg "$YELLOW" "  ► Applying NetPlan changes..."
+  if netplan apply 2>/dev/null; then
+    systemctl restart systemd-resolved 2>/dev/null
+    ln -sf /run/systemd/resolve/resolv.conf "$RESOLV_CONF"
+    sysmgmt_done "NetPlan DNS disabled. Config saved at ${NETPLAN_FILE}.disabled"
+  else
+    print_msg "$RED" "  ✗ Failed to apply. Restoring..."
+    mv "${NETPLAN_FILE}.disabled" "$NETPLAN_FILE"
+  fi
+}
+
+np_delete() {
+  echo ""
+  print_line
+  print_msg "$RED" "  Delete NetPlan DNS Configuration"
+  print_line
+
+  if [ ! -f "$NETPLAN_FILE" ] && [ ! -f "${NETPLAN_FILE}.disabled" ]; then
+    print_msg "$DIM" "  ℹ No NetPlan config files to delete."
+    echo ""
+    return
+  fi
+
+  # Show what will be deleted
+  if [ -f "$NETPLAN_FILE" ]; then
+    print_msg "$DIM" "  Will delete: $NETPLAN_FILE"
+  fi
+  if [ -f "${NETPLAN_FILE}.disabled" ]; then
+    print_msg "$DIM" "  Will delete: ${NETPLAN_FILE}.disabled"
+  fi
+
+  echo ""
+  echo -n -e "  ${RED}Are you sure? ${WHITE}[y/N]: ${NC}"
+  read -r confirm
+
+  if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+    print_msg "$DIM" "  Cancelled."
+    echo ""
+    return
+  fi
+
+  rm -f "$NETPLAN_FILE" "${NETPLAN_FILE}.disabled"
+  print_msg "$GREEN" "  ✓ NetPlan config files deleted."
+
+  print_msg "$YELLOW" "  ► Applying NetPlan changes..."
+  if netplan apply 2>/dev/null; then
+    systemctl restart systemd-resolved 2>/dev/null
+    ln -sf /run/systemd/resolve/resolv.conf "$RESOLV_CONF"
+    sysmgmt_done "NetPlan DNS configuration deleted permanently."
+  else
+    print_msg "$RED" "  ✗ Failed to apply changes."
+  fi
+}
+
+np_rollback() {
+  echo ""
+  print_line
+  print_msg "$YELLOW" "  Rollback NetPlan DNS Configuration"
+  print_line
+
+  # Check for disabled config first
+  if [ -f "${NETPLAN_FILE}.disabled" ]; then
+    print_msg "$YELLOW" "  ► Found disabled config. Re-enabling..."
+    mv "${NETPLAN_FILE}.disabled" "$NETPLAN_FILE"
+    chmod 600 "$NETPLAN_FILE"
+
+    if netplan generate >/dev/null 2>&1 && netplan apply 2>/dev/null; then
+      systemctl restart systemd-resolved 2>/dev/null
+      sysmgmt_done "NetPlan DNS re-enabled from disabled config."
+    else
+      print_msg "$RED" "  ✗ Restored config is invalid. Reverting..."
+      mv "$NETPLAN_FILE" "${NETPLAN_FILE}.disabled"
+      netplan apply 2>/dev/null
+    fi
+    return
+  fi
+
+  if [ -f "$NETPLAN_FILE" ]; then
+    print_msg "$DIM" "  ℹ NetPlan config is already active. Nothing to rollback."
+  else
+    print_msg "$DIM" "  ℹ No NetPlan config or backup found to rollback."
+  fi
+  echo ""
+}
+
+# ── resolv.conf / systemd-resolved Operations ──────────────────────────────
+
+resolved_view() {
+  echo ""
+  print_line
+  print_msg "$CYAN" "  systemd-resolved / resolv.conf Configuration"
+  print_line
+
+  # resolved.conf
+  echo ""
+  print_msg "$WHITE" "  ── ${SYSTEMD_CONF} ──"
   if [ -f "$SYSTEMD_CONF" ]; then
-    print_message "$YELLOW" "► [$TIMESTAMP] Restoring systemd-resolved defaults..."
-    
-    # Remove custom DNS and FallbackDNS entries
+    local dns_line=$(grep '^DNS=' "$SYSTEMD_CONF" 2>/dev/null)
+    local fb_line=$(grep '^FallbackDNS=' "$SYSTEMD_CONF" 2>/dev/null)
+    local stub_line=$(grep '^DNSStubListener=' "$SYSTEMD_CONF" 2>/dev/null)
+
+    if [ -n "$dns_line" ]; then
+      print_msg "$GREEN" "  $dns_line"
+    else
+      print_msg "$DIM" "  DNS= (not set, using defaults)"
+    fi
+    if [ -n "$fb_line" ]; then
+      print_msg "$GREEN" "  $fb_line"
+    fi
+    if [ -n "$stub_line" ]; then
+      print_msg "$DIM" "  $stub_line"
+    fi
+  else
+    print_msg "$DIM" "  File not found."
+  fi
+
+  # resolv.conf
+  echo ""
+  print_msg "$WHITE" "  ── ${RESOLV_CONF} ──"
+  if [ -L "$RESOLV_CONF" ]; then
+    print_msg "$DIM" "  Symlink → $(readlink "$RESOLV_CONF")"
+  fi
+  local resolv_ns=$(grep '^nameserver' "$RESOLV_CONF" 2>/dev/null)
+  if [ -n "$resolv_ns" ]; then
+    while IFS= read -r line; do
+      local ns_ip=$(echo "$line" | awk '{print $2}')
+      local ns_name=$(identify_dns_provider "$ns_ip")
+      if [ -n "$ns_name" ]; then
+        print_msg "$GREEN" "  $line  ${DIM}($ns_name)"
+      else
+        print_msg "$GREEN" "  $line"
+      fi
+    done <<< "$resolv_ns"
+  else
+    print_msg "$DIM" "  No nameservers found."
+  fi
+
+  # Backup status
+  echo ""
+  if [ -f "$BACKUP_CONF" ]; then
+    print_msg "$GREEN" "  ✓ Backup exists: $BACKUP_CONF"
+  else
+    print_msg "$DIM" "  ℹ No backup file found."
+  fi
+
+  # resolvectl
+  if command -v resolvectl &> /dev/null; then
+    echo ""
+    print_msg "$WHITE" "  ── resolvectl status ──"
+    local dns_servers=$(resolvectl status 2>/dev/null | grep -A 10 "DNS Servers" | grep -E "^\s+[0-9]" | head -4)
+    if [ -n "$dns_servers" ]; then
+      while IFS= read -r line; do
+        local srv_ip=$(echo "$line" | xargs)
+        local srv_name=$(identify_dns_provider "$srv_ip")
+        if [ -n "$srv_name" ]; then
+          print_msg "$GREEN" "  $srv_ip  ${DIM}($srv_name)"
+        else
+          print_msg "$GREEN" "  $srv_ip"
+        fi
+      done <<< "$dns_servers"
+    else
+      print_msg "$DIM" "  No DNS servers reported."
+    fi
+  fi
+  echo ""
+}
+
+resolved_edit() {
+  echo ""
+  print_line
+  print_msg "$CYAN" "  Edit systemd-resolved DNS Configuration"
+  print_line
+
+  # Show current
+  local current_dns=$(grep '^DNS=' "$SYSTEMD_CONF" 2>/dev/null | sed 's/DNS=//')
+  if [ -n "$current_dns" ]; then
+    print_msg "$DIM" "  Current DNS: $current_dns"
+  else
+    print_msg "$DIM" "  Current DNS: (system default)"
+  fi
+  echo ""
+
+  # Prompt new primary
+  local dns_primary=""
+  while true; do
+    echo -n -e "  ${WHITE}New Primary DNS IP: ${NC}"
+    read -r dns_primary
+    if validate_ipv4 "$dns_primary"; then
+      break
+    else
+      print_msg "$RED" "  ✗ Invalid IP. Format: x.x.x.x"
+    fi
+  done
+
+  # Prompt new secondary
+  local dns_secondary=""
+  echo -n -e "  ${WHITE}New Secondary DNS IP ${DIM}(Enter to skip)${NC}: "
+  read -r dns_secondary
+  if [ -n "$dns_secondary" ] && ! validate_ipv4 "$dns_secondary"; then
+    print_msg "$RED" "  ✗ Invalid IP. Skipping secondary."
+    dns_secondary=""
+  fi
+
+  create_backup
+
+  sed -i '/^DNS=/d' "$SYSTEMD_CONF"
+  sed -i '/^#DNS=/d' "$SYSTEMD_CONF"
+  sed -i "/^\[Resolve\]/a DNS=$dns_primary $dns_secondary" "$SYSTEMD_CONF"
+
+  # Disable DNSStubListener
+  sed -i 's/^#DNSStubListener=.*/DNSStubListener=no/' "$SYSTEMD_CONF"
+  sed -i 's/^DNSStubListener=.*/DNSStubListener=no/' "$SYSTEMD_CONF"
+
+  if systemctl restart systemd-resolved 2>/dev/null; then
+    ln -sf /run/systemd/resolve/stub-resolv.conf "$RESOLV_CONF"
+    sysmgmt_done "resolved.conf DNS updated to: $dns_primary ${dns_secondary}"
+  else
+    print_msg "$RED" "  ✗ Failed to restart systemd-resolved."
+  fi
+}
+
+resolved_disable() {
+  echo ""
+  print_line
+  print_msg "$YELLOW" "  Disable Custom DNS in systemd-resolved"
+  print_line
+
+  local has_custom=false
+  if grep -q '^DNS=' "$SYSTEMD_CONF" 2>/dev/null; then
+    has_custom=true
+  fi
+
+  if [ "$has_custom" = false ]; then
+    print_msg "$DIM" "  ℹ No custom DNS entries found in resolved.conf."
+    echo ""
+    return
+  fi
+
+  create_backup
+
+  print_msg "$YELLOW" "  ► Removing DNS and FallbackDNS entries..."
+  sed -i '/^DNS=/d' "$SYSTEMD_CONF"
+  sed -i '/^FallbackDNS=/d' "$SYSTEMD_CONF"
+  sed -i 's/^DNSStubListener=no/#DNSStubListener=yes/' "$SYSTEMD_CONF"
+
+  if systemctl restart systemd-resolved 2>/dev/null; then
+    ln -sf /run/systemd/resolve/resolv.conf "$RESOLV_CONF"
+    sysmgmt_done "Custom DNS disabled in systemd-resolved. Using DHCP defaults."
+  else
+    print_msg "$RED" "  ✗ Failed to restart systemd-resolved."
+  fi
+}
+
+resolved_delete() {
+  echo ""
+  print_line
+  print_msg "$RED" "  Delete Custom DNS & Backup from systemd-resolved"
+  print_line
+
+  local has_entries=false
+  if grep -q '^DNS=' "$SYSTEMD_CONF" 2>/dev/null; then
+    has_entries=true
+    print_msg "$DIM" "  Will remove: DNS entries from resolved.conf"
+  fi
+  if [ -f "$BACKUP_CONF" ]; then
+    has_entries=true
+    print_msg "$DIM" "  Will delete: $BACKUP_CONF"
+  fi
+
+  if [ "$has_entries" = false ]; then
+    print_msg "$DIM" "  ℹ Nothing to delete."
+    echo ""
+    return
+  fi
+
+  echo ""
+  echo -n -e "  ${RED}Are you sure? ${WHITE}[y/N]: ${NC}"
+  read -r confirm
+
+  if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+    print_msg "$DIM" "  Cancelled."
+    echo ""
+    return
+  fi
+
+  # Remove custom entries
+  sed -i '/^DNS=/d' "$SYSTEMD_CONF"
+  sed -i '/^FallbackDNS=/d' "$SYSTEMD_CONF"
+  sed -i 's/^DNSStubListener=no/#DNSStubListener=yes/' "$SYSTEMD_CONF"
+
+  # Delete backup
+  rm -f "$BACKUP_CONF"
+  print_msg "$GREEN" "  ✓ Backup file deleted."
+
+  if systemctl restart systemd-resolved 2>/dev/null; then
+    ln -sf /run/systemd/resolve/resolv.conf "$RESOLV_CONF"
+    sysmgmt_done "Custom DNS entries and backup deleted permanently."
+  else
+    print_msg "$RED" "  ✗ Failed to restart systemd-resolved."
+  fi
+}
+
+resolved_rollback() {
+  echo ""
+  print_line
+  print_msg "$YELLOW" "  Rollback systemd-resolved from Backup"
+  print_line
+
+  if [ ! -f "$BACKUP_CONF" ]; then
+    print_msg "$DIM" "  ℹ No backup file found at $BACKUP_CONF"
+    print_msg "$DIM" "  Cannot rollback without a backup."
+    echo ""
+    return
+  fi
+
+  print_msg "$YELLOW" "  ► Restoring from $BACKUP_CONF..."
+  cp "$BACKUP_CONF" "$SYSTEMD_CONF"
+  print_msg "$GREEN" "  ✓ resolved.conf restored from backup."
+
+  if systemctl restart systemd-resolved 2>/dev/null; then
+    ln -sf /run/systemd/resolve/stub-resolv.conf "$RESOLV_CONF"
+    sysmgmt_done "systemd-resolved rolled back to original backup."
+  else
+    print_msg "$RED" "  ✗ Failed to restart systemd-resolved."
+  fi
+}
+
+# ── Full System Reset ──────────────────────────────────────────────────────
+
+reset_all() {
+  echo ""
+  print_line
+  print_msg "$RED" "  Reset All DNS Manager Configurations"
+  print_line
+  echo ""
+
+  print_msg "$YELLOW" "  This will:"
+  print_msg "$DIM" "    • Delete NetPlan DNS config (+ disabled copy)"
+  print_msg "$DIM" "    • Remove custom DNS from systemd-resolved"
+  print_msg "$DIM" "    • Restore resolv.conf symlink to default"
+  print_msg "$DIM" "    • Delete backup file"
+  echo ""
+  echo -n -e "  ${RED}Are you sure? ${WHITE}[y/N]: ${NC}"
+  read -r confirm
+
+  if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+    print_msg "$DIM" "  Cancelled."
+    echo ""
+    return
+  fi
+
+  echo ""
+  local changes=0
+
+  # NetPlan
+  if [ -f "$NETPLAN_FILE" ] || [ -f "${NETPLAN_FILE}.disabled" ]; then
+    rm -f "$NETPLAN_FILE" "${NETPLAN_FILE}.disabled"
+    print_msg "$GREEN" "  ✓ NetPlan config files removed."
+    if check_netplan_installed; then
+      netplan apply 2>/dev/null
+    fi
+    changes=$((changes + 1))
+  fi
+
+  # systemd-resolved
+  if [ -f "$SYSTEMD_CONF" ]; then
     sed -i '/^DNS=/d' "$SYSTEMD_CONF"
     sed -i '/^FallbackDNS=/d' "$SYSTEMD_CONF"
-    
-    # Re-enable default DNSStubListener
     sed -i 's/^DNSStubListener=no/#DNSStubListener=yes/' "$SYSTEMD_CONF"
-    
-    if systemctl restart systemd-resolved 2>/dev/null; then
-      print_message "$GREEN" "✓ [$TIMESTAMP] systemd-resolved restarted with defaults"
-      changes_made=true
-    else
-      print_message "$RED" "✗ [$TIMESTAMP] Failed to restart systemd-resolved"
-    fi
+    print_msg "$GREEN" "  ✓ systemd-resolved custom entries removed."
+    changes=$((changes + 1))
   fi
-  
-  # Ensure proper symlink
-  print_message "$YELLOW" "► [$TIMESTAMP] Settling resolv.conf symlink to upstream..."
+
+  # Backup
+  if [ -f "$BACKUP_CONF" ]; then
+    rm -f "$BACKUP_CONF"
+    print_msg "$GREEN" "  ✓ Backup file deleted."
+    changes=$((changes + 1))
+  fi
+
+  # Symlink
   ln -sf /run/systemd/resolve/resolv.conf "$RESOLV_CONF"
-  print_message "$GREEN" "✓ [$TIMESTAMP] resolv.conf symlink restored"
-  
-  if [ "$changes_made" = true ]; then
-    print_separator
-    print_message "$GREEN" "✓ DNS Reset to System Default Complete!"
-    print_separator
+  print_msg "$GREEN" "  ✓ resolv.conf symlink restored to default."
+
+  # Restart
+  systemctl restart systemd-resolved 2>/dev/null
+
+  if [ $changes -gt 0 ]; then
+    sysmgmt_done "Full DNS reset complete. All DNS Manager configs removed."
   else
-    print_message "$YELLOW" "ℹ System was already using default configuration"
+    print_msg "$DIM" "  ℹ System was already clean. No changes needed."
+    show_current_dns_status
+    echo ""
+    exit 0
   fi
-  
-  echo ""
-  show_dns_table
 }
 
-rollback_dns() {
+# ── System Management Submenu ─────────────────────────────────────────────
+
+show_sysmgmt_menu() {
+  clear
   echo ""
-  print_separator
-  print_message "$YELLOW" "Rolling Back DNS Configuration"
-  print_separator
-  
-  local restored=false
-  
-  # Remove NetPlan config if exists
+  echo -e "${BLUE}╔══════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${BLUE}║${NC}${BOLD}${WHITE}              ⚙  System Management                          ${NC}${BLUE}║${NC}"
+  echo -e "${BLUE}╚══════════════════════════════════════════════════════════════╝${NC}"
+
+  echo ""
+
+  # NetPlan status indicator
+  local np_status="${DIM}not found${NC}"
   if [ -f "$NETPLAN_FILE" ]; then
-    print_message "$YELLOW" "► [$TIMESTAMP] Removing NetPlan configuration..."
-    rm -f "$NETPLAN_FILE"
-    
-    if netplan apply 2>/dev/null; then
-      print_message "$GREEN" "✓ [$TIMESTAMP] NetPlan configuration rolled back"
-      restored=true
-    else
-      print_message "$RED" "✗ [$TIMESTAMP] Failed to apply NetPlan rollback"
-    fi
+    np_status="${GREEN}● active${NC}"
+  elif [ -f "${NETPLAN_FILE}.disabled" ]; then
+    np_status="${YELLOW}● disabled${NC}"
   fi
-  
-  # Restore systemd-resolved from backup
-  if [ -f "$BACKUP_CONF" ]; then
-    print_message "$YELLOW" "► [$TIMESTAMP] Restoring systemd-resolved from backup..."
-    cp "$BACKUP_CONF" "$SYSTEMD_CONF"
-    print_message "$GREEN" "✓ [$TIMESTAMP] Restored original resolved.conf"
-    
-    if systemctl restart systemd-resolved 2>/dev/null; then
-      print_message "$GREEN" "✓ [$TIMESTAMP] systemd-resolved restarted"
-      restored=true
-    else
-      print_message "$RED" "✗ [$TIMESTAMP] Failed to restart systemd-resolved"
-    fi
+
+  # Resolved status indicator
+  local res_status="${DIM}default${NC}"
+  if grep -q '^DNS=' "$SYSTEMD_CONF" 2>/dev/null; then
+    res_status="${GREEN}● custom DNS set${NC}"
   fi
-  
-  if [ "$restored" = false ]; then
-    print_message "$YELLOW" "ℹ No custom configuration found to rollback"
-  fi
-  
-  # Ensure proper symlink
-  ln -sf /run/systemd/resolve/stub-resolv.conf "$RESOLV_CONF"
-  
-  print_separator
-  print_message "$GREEN" "✓ DNS Rollback Complete!"
-  print_separator
-  
+
+  echo -e " ${GREEN}── NetPlan${NC} ${DIM}($NETPLAN_FILE)${NC} [$np_status]"
+  echo -e "  ${WHITE} 1)${NC} View     ${DIM}— Show current NetPlan DNS config${NC}"
+  echo -e "  ${WHITE} 2)${NC} Edit     ${DIM}— Modify DNS addresses in NetPlan${NC}"
+  echo -e "  ${WHITE} 3)${NC} Disable  ${DIM}— Suspend config without deleting${NC}"
+  echo -e "  ${WHITE} 4)${NC} Delete   ${DIM}— Remove NetPlan config permanently${NC}"
+  echo -e "  ${WHITE} 5)${NC} Rollback ${DIM}— Re-enable disabled config${NC}"
+
   echo ""
-  show_dns_table
+  echo -e " ${YELLOW}── resolv.conf / systemd-resolved${NC} [$res_status]"
+  echo -e "  ${WHITE} 6)${NC} View     ${DIM}— Show resolved.conf & resolv.conf${NC}"
+  echo -e "  ${WHITE} 7)${NC} Edit     ${DIM}— Modify DNS in resolved.conf${NC}"
+  echo -e "  ${WHITE} 8)${NC} Disable  ${DIM}— Remove custom DNS, use DHCP defaults${NC}"
+  echo -e "  ${WHITE} 9)${NC} Delete   ${DIM}— Remove custom DNS entries & backup${NC}"
+  echo -e "  ${WHITE}10)${NC} Rollback ${DIM}— Restore resolved.conf from backup${NC}"
+
+  echo ""
+  echo -e " ${RED}── Full System ──────────────────────────────────────────────${NC}"
+  echo -e "  ${WHITE}11)${NC} ${RED}Reset All${NC} ${DIM}— Remove ALL DNS Manager configurations${NC}"
+
+  echo ""
+  echo -e "  ${WHITE} 0)${NC} ← Back to main menu"
+  echo ""
+}
+
+system_management() {
+  while true; do
+    show_sysmgmt_menu
+    echo -n -e "  ${WHITE}Choose an option: ${NC}"
+    read -r sm_choice
+
+    case "$sm_choice" in
+      1)  np_view ;;
+      2)  np_edit ;;
+      3)  np_disable ;;
+      4)  np_delete ;;
+      5)  np_rollback ;;
+      6)  resolved_view ;;
+      7)  resolved_edit ;;
+      8)  resolved_disable ;;
+      9)  resolved_delete ;;
+      10) resolved_rollback ;;
+      11) reset_all ;;
+      0)  return ;;
+      *)
+        print_msg "$RED" "  ✗ Invalid option. Enter 0-11."
+        sleep 1
+        ;;
+    esac
+
+    # If we're still here (view operations), pause before returning to submenu
+    echo -e "${DIM}  Press Enter to continue...${NC}"
+    read -r
+  done
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Main Interactive Loop
+# Main
 # ─────────────────────────────────────────────────────────────────────────────
 
 main() {
   while true; do
     show_menu
-    echo -n -e "${WHITE}Choose an option: ${NC}"
+    echo -n -e "  ${WHITE}Choose an option: ${NC}"
     read -r choice
-    
+
     case $choice in
       1) add_shekan_pro ;;
       2) add_shekan_free ;;
@@ -601,26 +1225,22 @@ main() {
       6) add_quad9_dns ;;
       7) add_opendns ;;
       8) add_adguard_dns ;;
-      9) add_expressvpn_dns ;;
-      [Nn]) remove_netplan_dns ;;
-      [Rr]) reset_resolv_conf ;;
-      [Bb]) rollback_dns ;;
+      9) add_level3_dns ;;
+      [Cc]) add_custom_dns ;;
+      [Ss]) system_management ;;
       0)
         echo ""
-        print_message "$GREEN" "✓ Exiting DNS Manager. Goodbye!"
+        print_msg "$GREEN" "  ✓ Exiting DNS Manager. Goodbye!"
         echo ""
         exit 0
         ;;
       *)
-        print_message "$RED" "✗ Invalid option. Please try again."
+        print_msg "$RED" "  ✗ Invalid option. Please try again."
+        sleep 1
         ;;
     esac
-    
-    echo ""
-    echo -e "${DIM}Press Enter to continue...${NC}"
-    read -r
   done
 }
 
-# Run main function
+# Run
 main
