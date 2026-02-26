@@ -60,7 +60,9 @@ check_systemd_resolved() {
 }
 
 get_active_interface() {
-  ip route | grep '^default' | awk '{print $5}' | head -n1
+  # Exclude virtual/Docker interfaces (docker0, br-*, veth*) so we always
+  # operate on the real physical/VPN interface.
+  ip route | grep '^default' | awk '{print $5}' | grep -v -E '^(docker|br-|veth)' | head -n1
 }
 
 get_interface_type() {
@@ -103,8 +105,42 @@ identify_dns_provider() {
     94.140.14.14|94.140.15.15)    echo "AdGuard" ;;
     4.2.2.4|4.2.2.1)              echo "Level3" ;;
     127.0.0.53)                    echo "systemd-stub" ;;
+    10.255.255.1)                  echo "Docker DNS" ;;
     *)                             echo "" ;;
   esac
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Docker DNS Filter
+# Removes Docker/virtual-bridge nameserver entries (10.255.255.x, 172.x.x.x)
+# from /etc/resolv.conf so they do not interfere with the configured DNS.
+# ─────────────────────────────────────────────────────────────────────────────
+
+clean_docker_dns_from_resolv() {
+  # Only act on real files; if it is a symlink we cannot safely edit in place
+  if [ -L "$RESOLV_CONF" ]; then
+    return 0
+  fi
+
+  local tmp
+  tmp=$(mktemp)
+
+  while IFS= read -r line; do
+    # Drop nameserver lines that match Docker/virtual-bridge address ranges:
+    #   10.255.255.x  – Docker Desktop stub
+    #   172.16-31.x.x – Docker bridge subnets
+    if echo "$line" | grep -qE '^nameserver[[:space:]]+(10\.255\.255\.|172\.(1[6-9]|2[0-9]|3[01])\.)'; then
+      print_msg "$YELLOW" "  ► Removed Docker DNS from resolv.conf: $(echo "$line" | awk '{print $2}')" >&2
+      continue
+    fi
+    echo "$line"
+  done < "$RESOLV_CONF" > "$tmp"
+
+  # Only overwrite if something actually changed
+  if ! diff -q "$RESOLV_CONF" "$tmp" > /dev/null 2>&1; then
+    cp "$tmp" "$RESOLV_CONF"
+  fi
+  rm -f "$tmp"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -223,26 +259,28 @@ show_menu() {
 # ─────────────────────────────────────────────────────────────────────────────
 
 choose_apply_method() {
-  # Returns: "netplan" or "resolved"
-  echo ""
-  print_line
-  echo -e " ${BOLD}${WHITE}How do you want to apply DNS?${NC}"
-  print_line
-  echo ""
+  # Returns: "netplan" or "resolved" on stdout.
+  # All interactive display is sent to stderr so it is visible
+  # even when the caller uses method=$(choose_apply_method).
+  echo "" >&2
+  print_line >&2
+  echo -e " ${BOLD}${WHITE}How do you want to apply DNS?${NC}" >&2
+  print_line >&2
+  echo "" >&2
 
   local netplan_available=false
   if check_netplan_installed; then
     netplan_available=true
-    echo -e "  ${WHITE}1)${NC} ${GREEN}NetPlan${NC}          ${DIM}(/etc/netplan/99-dns-manager.yaml)${NC}"
+    echo -e "  ${WHITE}1)${NC} ${GREEN}NetPlan${NC}          ${DIM}(/etc/netplan/99-dns-manager.yaml)${NC}" >&2
   else
-    echo -e "  ${DIM}1) NetPlan          (not installed)${NC}"
+    echo -e "  ${DIM}1) NetPlan          (not installed)${NC}" >&2
   fi
 
-  echo -e "  ${WHITE}2)${NC} ${GREEN}resolv.conf${NC}      ${DIM}(systemd-resolved /etc/systemd/resolved.conf)${NC}"
-  echo ""
+  echo -e "  ${WHITE}2)${NC} ${GREEN}resolv.conf${NC}      ${DIM}(systemd-resolved /etc/systemd/resolved.conf)${NC}" >&2
+  echo "" >&2
 
   while true; do
-    echo -n -e "  ${WHITE}Choose method [1/2]: ${NC}"
+    echo -n -e "  ${WHITE}Choose method [1/2]: ${NC}" >&2
     read -r method_choice
 
     case "$method_choice" in
@@ -251,7 +289,7 @@ choose_apply_method() {
           echo "netplan"
           return
         else
-          print_msg "$YELLOW" "  ⚠ NetPlan is not installed. Please choose option 2."
+          print_msg "$YELLOW" "  ⚠ NetPlan is not installed. Please choose option 2." >&2
         fi
         ;;
       2)
@@ -259,7 +297,7 @@ choose_apply_method() {
         return
         ;;
       *)
-        print_msg "$RED" "  ✗ Invalid choice. Enter 1 or 2."
+        print_msg "$RED" "  ✗ Invalid choice. Enter 1 or 2." >&2
         ;;
     esac
   done
@@ -369,6 +407,9 @@ EOF
     if [ ! -L "$RESOLV_CONF" ] || [ "$(readlink "$RESOLV_CONF")" != "/run/systemd/resolve/stub-resolv.conf" ]; then
       ln -sf /run/systemd/resolve/stub-resolv.conf "$RESOLV_CONF"
     fi
+
+    # Remove any Docker/virtual-bridge DNS entries that may have leaked in
+    clean_docker_dns_from_resolv
   else
     print_msg "$RED" "  ✗ NetPlan apply failed: $output"
     rm -f "$NETPLAN_FILE"
@@ -418,6 +459,9 @@ apply_dns_resolved() {
 
   # Update resolv.conf symlink
   ln -sf /run/systemd/resolve/stub-resolv.conf "$RESOLV_CONF"
+
+  # Remove any Docker/virtual-bridge DNS entries that may have leaked in
+  clean_docker_dns_from_resolv
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
